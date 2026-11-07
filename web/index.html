@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TeaFabric 1.16.5</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game" tabindex="0"></canvas>
+  <div id="overlay">
+    <div id="panel">
+      <h1>TeaFabric <span>1.16.5</span></h1>
+      <p id="status">Loading…</p>
+      <div id="bar"><div id="fill"></div></div>
+      <p id="note">Minecraft 1.16.5 · Fabric Loader · TeaVM WebAssembly GC</p>
+    </div>
+  </div>
+  <pre id="log" hidden></pre>
+  <script src="teavm/classes.wasm-runtime.js"></script>
+  <script src="boot.js"></script>
+</body>
+</html>

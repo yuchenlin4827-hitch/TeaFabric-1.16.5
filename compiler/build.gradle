@@ -1,0 +1,20 @@
+plugins {
+    id 'java'
+}
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+
+def teavmVersion = rootProject.property('teavm_version')
+
+dependencies {
+    implementation "org.teavm:teavm-tooling:${teavmVersion}"
+}
+
+tasks.register('printClasspath') {
+    doLast { println sourceSets.main.runtimeClasspath.files.join('\n') }
+}
+
+dependencies {
+    compileOnly "org.teavm:teavm-core:${teavmVersion}"
+    compileOnly "org.teavm:teavm-relocated-libs-hppc:${teavmVersion}"
+}

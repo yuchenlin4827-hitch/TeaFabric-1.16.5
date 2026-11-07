@@ -22,3 +22,18 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# Gradle / IDE
+.gradle/
+build/
+out/
+.idea/
+*.iml
+!gradle/wrapper/gradle-wrapper.jar
+
+# Downloaded Minecraft / Fabric files and generated output.
+# Minecraft is proprietary software: the client jar, its assets and anything
+# derived from them (baked jars, compiled wasm) must never be committed.
+.cache/
+run/
+web/dist/

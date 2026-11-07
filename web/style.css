@@ -1,0 +1,58 @@
+:root {
+  --bg: #101418;
+  --panel: #1b2128;
+  --text: #e6e9ec;
+  --muted: #8b949e;
+  --accent: #4caf50;
+  --error: #ff6b6b;
+}
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 system-ui, sans-serif;
+}
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  outline: none;
+  image-rendering: pixelated;
+}
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 16px;
+}
+#overlay.hidden { display: none; }
+#panel {
+  width: min(420px, 100%);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 24px;
+  box-sizing: border-box;
+}
+#panel h1 { margin: 0 0 12px; font-size: 22px; }
+#panel h1 span { color: var(--muted); font-weight: normal; }
+#bar { height: 6px; background: #2c343d; border-radius: 3px; overflow: hidden; }
+#fill { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+#note { color: var(--muted); font-size: 12px; margin-bottom: 0; }
+#status.error { color: var(--error); white-space: pre-wrap; }
+#log {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  max-height: 40vh;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, .85);
+  color: #ffb4b4;
+  font: 12px/1.35 ui-monospace, monospace;
+  white-space: pre-wrap;
+}

@@ -1,0 +1,8 @@
+rootProject.name = 'TeaFabric-1.16.5'
+
+// tools     - host-side JVM tools: downloader, remapper, mixin baker driver, TeaVM driver
+// baker     - Fabric mod run inside the real Fabric Loader at build time; dumps post-mixin bytecode
+// webmod    - Fabric mod with the mixins that adapt Minecraft 1.16.5 to the browser
+// compiler  - host-side TeaVM driver (isolated classpath so program classes never clash with tool deps)
+// platform  - code compiled by TeaVM: LWJGL/GLFW/OpenAL replacements, JDK class library additions, entry point
+include 'tools', 'baker', 'webmod', 'platform', 'compiler'
