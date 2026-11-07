@@ -69,5 +69,6 @@ final class WebLauncher {
         RenderSystem.initGameThread(false);
         LogSink.log(1, "INFO", "TeaFabric", "Entering the game loop", null);
         client[0].method_1514(); // MinecraftClient.run()
+        LogSink.log(2, "WARN", "TeaFabric", "MinecraftClient.run() returned (game loop ended)", null);
     }
 }

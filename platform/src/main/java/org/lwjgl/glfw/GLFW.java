@@ -124,7 +124,12 @@ public class GLFW {
     public static void glfwSwapInterval(int interval) {
     }
 
+    private static int swaps;
+
     public static void glfwSwapBuffers(long window) {
+        if (swaps++ == 0) {
+            teafabric.web.log.LogSink.log(1, "INFO", "TeaFabric", "First frame presented", null);
+        }
         WebWindow.waitForFrame();
     }
 

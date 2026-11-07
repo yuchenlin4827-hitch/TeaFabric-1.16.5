@@ -44,6 +44,7 @@ public final class WebMain {
             } else {
                 WebLauncher.launch(Boot.username(), WebWindow.width(), WebWindow.height());
             }
+            LogSink.log(2, "WARN", "TeaFabric", "WebMain.main finished", null);
         } catch (ExitError e) {
             LogSink.log(1, "INFO", "TeaFabric", "Game exited with status " + e.status, null);
         } catch (Throwable t) {
