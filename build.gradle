@@ -123,6 +123,21 @@ tasks.register('generateTables', JavaExec) {
     }
 }
 
+def clinitsJar = file('.cache/generated/clinits.jar')
+
+tasks.register('splitClinits', JavaExec) {
+    group = 'teafabric'
+    description = 'Splits huge static initialisers (Blocks, Items, ...) so V8 can optimise them without running out of memory.'
+    dependsOn ':tools:classes', ':platform:classes'
+    classpath = project(':tools').sourceSets.main.runtimeClasspath
+    mainClass = 'teafabric.tools.SplitClinits'
+    outputs.file(clinitsJar)
+    doFirst {
+        args "--out=${clinitsJar}",
+             "--classpath=${programClasspath().collect { it.absolutePath }.join(File.pathSeparator)}"
+    }
+}
+
 tasks.register('stubWeb', JavaExec) {
     group = 'teafabric'
     description = 'Generates throwing stubs for browser-impossible APIs reported missing by compileWeb.'
@@ -140,12 +155,13 @@ tasks.register('stubWeb', JavaExec) {
 tasks.register('compileWeb', JavaExec) {
     group = 'teafabric'
     description = 'Compiles the baked game with TeaVM (-PteavmTarget=wasm-gc|js).'
-    dependsOn ':platform:classes', ':compiler:classes', 'generateTables'
+    dependsOn ':platform:classes', ':compiler:classes', 'generateTables', 'splitClinits'
     classpath = project(':compiler').sourceSets.main.runtimeClasspath
     mainClass = 'teafabric.compiler.Compile'
     maxHeapSize = findProperty('teavmHeap') ?: '6g'
     doFirst {
-        def cp = [tablesJar] + programClasspath() // generated tables shadow the baker's copies
+        // generated tables and split class initialisers shadow the baker's copies
+        def cp = [tablesJar, clinitsJar] + programClasspath()
         if (stubsJar.exists()) {
             cp += stubsJar // lowest priority: only fills gaps
         }
