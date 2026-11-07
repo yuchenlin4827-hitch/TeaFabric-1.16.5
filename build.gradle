@@ -193,6 +193,14 @@ tasks.register('webClasspathZip', Zip) {
     from(zipTree(bakedJar)) {
         exclude '**/*.class', 'META-INF/**'
     }
+    // ICU4J's core property data (Bidi for Minecraft's text renderer, normalisation, case mapping);
+    // locale bundles (*.res) are left out.
+    def icu = setupJars('minecraft.libraries').find { it.name.startsWith('icu4j') }
+    if (icu != null) {
+        from(zipTree(icu)) {
+            include 'com/ibm/icu/impl/data/icudt*/*.icu', 'com/ibm/icu/impl/data/icudt*/*.nrm'
+        }
+    }
     entryCompression = ZipEntryCompression.STORED
     archiveFileName = 'classpath.zip'
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE

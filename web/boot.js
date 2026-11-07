@@ -48,8 +48,12 @@
         x.send();
       } catch (e) { /* ignore */ }
     }
-    if (severity >= 3 || params.has('log')) {
+    // The overlay opens by itself only for crashes; everything else is in the console (or ?log).
+    const fatal = /^\[FATAL\]|---- Minecraft Crash Report ----|Unhandled exception on the main thread/.test(text);
+    if (fatal || params.has('log')) {
       logEl.hidden = false;
+    }
+    if (severity >= 3 || params.has('log')) {
       logEl.textContent += text + '\n';
       logEl.scrollTop = logEl.scrollHeight;
     }
