@@ -1,0 +1,72 @@
+plugins {
+    id 'java'
+}
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+dependencies {
+    implementation 'com.google.code.gson:gson:2.11.0'
+    implementation 'org.ow2.asm:asm:9.8'
+    implementation 'org.ow2.asm:asm-tree:9.8'
+    implementation 'org.ow2.asm:asm-commons:9.8'
+    implementation 'net.fabricmc:tiny-remapper:0.15.0'
+    implementation 'net.fabricmc:mapping-io:0.9.2'
+}
+
+def cache = rootProject.file('.cache')
+
+tasks.register('setupMinecraft', JavaExec) {
+    group = 'teafabric'
+    description = 'Downloads Minecraft 1.16.5 (jar, libraries, assets) and the latest Fabric Loader + Fabric API.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'teafabric.tools.Setup'
+    args "--cache=${cache}",
+         "--minecraft=${project.property('minecraft_version')}",
+         "--loader=${project.property('fabric_loader_version')}",
+         "--fabric-api=${project.property('fabric_api_version')}",
+         "--assets=${project.findProperty('assets') ?: 'default'}"
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('printClasspath') {
+    doLast { println sourceSets.main.runtimeClasspath.asPath }
+}
+
+def setupJarsOf = { String key -> rootProject.setupJars(key) }
+def intermediaryClient = new File(cache, 'minecraft/client-intermediary.jar')
+
+tasks.register('remapIntermediary', JavaExec) {
+    group = 'teafabric'
+    description = 'Remaps the vanilla client jar to intermediary names (compile classpath for :webmod).'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'teafabric.tools.Remap'
+    inputs.file(new File(cache, 'setup.properties'))
+    outputs.file(intermediaryClient)
+    doFirst {
+        args "--input=${rootProject.setupValue('minecraft.clientJar')}",
+             "--output=${intermediaryClient}",
+             "--mappings=${rootProject.setupValue('fabric.intermediaryJar')}",
+             "--from=official", "--to=intermediary",
+             "--classpath=${setupJarsOf('minecraft.libraries').join(File.pathSeparator)}"
+    }
+}
+
+// Optional developer aid: a Yarn-named copy of the client for reading (never shipped or committed).
+configurations { yarn }
+dependencies { yarn 'net.fabricmc:yarn:1.16.5+build.10:v2' }
+tasks.register('remapNamed', JavaExec) {
+    group = 'teafabric'
+    description = 'Developer aid: remaps the intermediary client to Yarn names into .cache/minecraft/client-named.jar.'
+    dependsOn 'remapIntermediary'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'teafabric.tools.Remap'
+    doFirst {
+        args "--input=${intermediaryClient}",
+             "--output=${new File(cache, 'minecraft/client-named.jar')}",
+             "--mappings=${configurations.yarn.singleFile}",
+             "--from=intermediary", "--to=named",
+             "--classpath=${setupJarsOf('minecraft.libraries').join(File.pathSeparator)}"
+    }
+}

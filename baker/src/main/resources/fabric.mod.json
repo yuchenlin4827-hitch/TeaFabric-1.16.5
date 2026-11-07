@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "teafabric_baker",
+  "version": "1.0.0",
+  "name": "TeaFabric build-time baker",
+  "description": "Dumps post-mixin bytecode for ahead-of-time compilation with TeaVM. Only used during the build.",
+  "license": "GPL-3.0-only",
+  "environment": "*",
+  "entrypoints": {
+    "preLaunch": ["teafabric.baker.Baker"]
+  },
+  "depends": {
+    "fabricloader": ">=0.14.0"
+  }
+}

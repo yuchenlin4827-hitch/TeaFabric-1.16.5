@@ -1,0 +1,11 @@
+plugins {
+    id 'java'
+}
+
+// Runs on the host JVM inside Fabric Loader during the build only.
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+tasks.withType(JavaCompile).configureEach { options.release = 17 }
+
+dependencies {
+    compileOnly files(rootProject.setupJars('fabric.classpath'))
+}

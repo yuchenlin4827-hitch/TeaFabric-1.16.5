@@ -1,0 +1,37 @@
+plugins {
+    id 'java'
+}
+
+// Code in this project is compiled twice: by javac (to bytecode) and then by TeaVM (to Wasm GC).
+// It replaces native/desktop-only pieces of Minecraft's runtime with browser implementations.
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.compilerArgs += ['-Xlint:-options']
+}
+
+def teavmVersion = rootProject.property('teavm_version')
+
+configurations {
+    // Artifacts that become part of the compiled program (TeaVM class library + JSO bindings).
+    teavmProgram
+}
+
+dependencies {
+    compileOnly "org.teavm:teavm-jso:${teavmVersion}"
+    compileOnly "org.teavm:teavm-jso-apis:${teavmVersion}"
+    compileOnly "org.teavm:teavm-interop:${teavmVersion}"
+    compileOnly "org.teavm:teavm-platform:${teavmVersion}"
+    compileOnly "org.teavm:teavm-classlib:${teavmVersion}"
+    compileOnly "org.teavm:teavm-core:${teavmVersion}"
+    compileOnly files(rootProject.file('.cache/baked/baked.jar'))
+    compileOnly files(rootProject.setupJars('minecraft.libraries').findAll { !it.name.startsWith('lwjgl') })
+
+    teavmProgram "org.teavm:teavm-classlib:${teavmVersion}"
+    teavmProgram "org.teavm:teavm-jso:${teavmVersion}"
+    teavmProgram "org.teavm:teavm-jso-apis:${teavmVersion}"
+    teavmProgram "org.teavm:teavm-jso-impl:${teavmVersion}"
+    teavmProgram "org.teavm:teavm-interop:${teavmVersion}"
+    teavmProgram "org.teavm:teavm-platform:${teavmVersion}"
+    teavmProgram "org.teavm:teavm-metaprogramming-impl:${teavmVersion}"
+}

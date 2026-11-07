@@ -1,0 +1,33 @@
+# Call-site redirects applied by the TeaVM plugin (compiler/.../RedirectTransformer).
+# owner                  method               descriptor                                   -> target
+java.lang.Runtime        addShutdownHook      (Ljava/lang/Thread;)V                        -> teafabric.web.compat.RuntimeCompat
+java.lang.Runtime        removeShutdownHook   (Ljava/lang/Thread;)Z                        -> teafabric.web.compat.RuntimeCompat
+java.lang.Runtime        maxMemory            ()J                                          -> teafabric.web.compat.RuntimeCompat
+java.lang.Runtime        halt                 (I)V                                         -> teafabric.web.compat.RuntimeCompat
+java.lang.System         exit                 (I)V                                         -> teafabric.web.compat.LangCompat
+java.lang.Class          getResource          (Ljava/lang/String;)Ljava/net/URL;            -> teafabric.web.compat.LangCompat
+java.lang.Class          getResourceAsStream  (Ljava/lang/String;)Ljava/io/InputStream;     -> teafabric.web.compat.LangCompat
+java.lang.Class          getSigners           ()[Ljava/lang/Object;                         -> teafabric.web.compat.LangCompat
+java.lang.Class          isAnonymousClass     ()Z                                          -> teafabric.web.compat.LangCompat
+java.lang.Class          getGenericSuperclass ()Ljava/lang/reflect/Type;                    -> teafabric.web.compat.LangCompat
+java.lang.Class          getGenericInterfaces ()[Ljava/lang/reflect/Type;                   -> teafabric.web.compat.LangCompat
+java.lang.ClassLoader    getResource          (Ljava/lang/String;)Ljava/net/URL;            -> teafabric.web.compat.LangCompat
+java.lang.ClassLoader    getResourceAsStream  (Ljava/lang/String;)Ljava/io/InputStream;     -> teafabric.web.compat.LangCompat
+java.lang.ClassLoader    getResources         (Ljava/lang/String;)Ljava/util/Enumeration;   -> teafabric.web.compat.LangCompat
+java.lang.ClassLoader    getSystemResource    (Ljava/lang/String;)Ljava/net/URL;            -> teafabric.web.compat.LangCompat
+java.lang.ClassLoader    getSystemResourceAsStream (Ljava/lang/String;)Ljava/io/InputStream; -> teafabric.web.compat.LangCompat
+java.lang.Long           parseUnsignedLong    (Ljava/lang/String;I)J                        -> teafabric.web.compat.LangCompat
+java.util.Collections    unmodifiableSortedSet (Ljava/util/SortedSet;)Ljava/util/SortedSet; -> teafabric.web.compat.LangCompat
+java.util.Collections    unmodifiableNavigableSet (Ljava/util/NavigableSet;)Ljava/util/NavigableSet; -> teafabric.web.compat.LangCompat
+java.util.Collections    unmodifiableSortedMap (Ljava/util/SortedMap;)Ljava/util/SortedMap; -> teafabric.web.compat.LangCompat
+java.util.Date           from                 (Ljava/time/Instant;)Ljava/util/Date;         -> teafabric.web.compat.LangCompat
+java.util.Spliterators   emptySpliterator     ()Ljava/util/Spliterator;                     -> teafabric.web.compat.LangCompat
+java.io.File             toPath               ()Ljava/nio/file/Path;                        -> teafabric.web.compat.IoCompat
+java.io.FileInputStream  getChannel           ()Ljava/nio/channels/FileChannel;             -> teafabric.web.compat.IoCompat
+java.io.FileOutputStream getChannel           ()Ljava/nio/channels/FileChannel;             -> teafabric.web.compat.IoCompat
+java.io.RandomAccessFile getChannel           ()Ljava/nio/channels/FileChannel;             -> teafabric.web.compat.IoCompat
+com.ibm.icu.impl.ICUBinary mapFile            (Ljava/io/File;)Ljava/nio/ByteBuffer;         -> teafabric.web.compat.IoCompat
+java.lang.invoke.MethodHandles lookup         ()Ljava/lang/invoke/MethodHandles$Lookup;     -> teafabric.web.compat.InvokeCompat
+java.lang.invoke.MethodHandles publicLookup   ()Ljava/lang/invoke/MethodHandles$Lookup;     -> teafabric.web.compat.InvokeCompat
+java.lang.invoke.MethodHandle invokeExact     ()Z                                          -> teafabric.web.compat.InvokeCompat
+java.lang.invoke.MethodHandle invoke          (J)V                                         -> teafabric.web.compat.InvokeCompat

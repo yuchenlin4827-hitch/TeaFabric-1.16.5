@@ -1,0 +1,113 @@
+// Root build: orchestrates download -> remap -> bake -> TeaVM (Wasm GC) -> web bundle.
+// See README.md for the pipeline description.
+
+ext {
+    cacheDir = file('.cache')
+    setupFile = file('.cache/setup.properties')
+    // Reads a value written by :tools:setupMinecraft. Returns null before setup has run.
+    setupValue = { String key ->
+        if (!setupFile.exists()) return null
+        def p = new Properties()
+        setupFile.withInputStream { p.load(it) }
+        return p.getProperty(key)
+    }
+    // Returns the jar files of a ';'-separated "coords=path" list from setup.properties.
+    setupJars = { String key ->
+        def v = setupValue(key)
+        if (v == null || v.isEmpty()) return []
+        return v.split(';').collect { file(it.substring(it.indexOf('=') + 1)) }
+    }
+}
+
+subprojects {
+    repositories {
+        // Google's Maven Central mirror first: repo.maven.apache.org rate-limits bursts (HTTP 429).
+        maven { url = 'https://maven-central.storage-download.googleapis.com/maven2/' }
+        mavenCentral()
+        maven { url = 'https://maven.fabricmc.net/' }
+        maven { url = 'https://libraries.minecraft.net/' }
+    }
+    plugins.withId('java') {
+        tasks.withType(JavaCompile).configureEach {
+            options.encoding = 'UTF-8'
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Bake: run the real Fabric Loader over the vanilla client and dump post-transformation classes.
+// ---------------------------------------------------------------------------------------------
+def bakeRun = file('.cache/bake-run')
+def bakedJar = file('.cache/baked/baked.jar')
+def withFabricApi = (findProperty('withFabricApi') ?: 'false').toBoolean()
+
+tasks.register('prepareBakeMods', Sync) {
+    group = 'teafabric'
+    description = 'Collects the mods that are baked into the web build.'
+    dependsOn ':baker:jar'
+    from(project(':baker').tasks.named('jar'))
+    if (findProject(':webmod')?.file('src')?.exists()) {
+        dependsOn ':webmod:jar'
+        from(project(':webmod').tasks.named('jar'))
+    }
+    if (withFabricApi && setupValue('fabric.api.jar') != null) {
+        from(setupJars('fabric.api.modules'))
+    }
+    // User-supplied Fabric mods (intermediary-mapped release jars) go into ./mods.
+    from(fileTree('mods') { include '*.jar' })
+    into(new File(bakeRun, 'mods'))
+}
+
+tasks.register('bake', JavaExec) {
+    group = 'teafabric'
+    description = 'Runs Fabric Loader at build time and writes mixin-applied bytecode to .cache/baked/baked.jar.'
+    dependsOn 'prepareBakeMods'
+    inputs.dir(new File(bakeRun, 'mods'))
+    inputs.file(setupFile)
+    outputs.file(bakedJar)
+    workingDir = bakeRun
+    classpath = files(setupJars('fabric.classpath')) +
+            files(setupJars('minecraft.libraries')) +
+            files(setupValue('minecraft.clientJar') ?: [])
+    mainClass = setupValue('fabric.mainClass') ?: 'net.fabricmc.loader.impl.launch.knot.KnotClient'
+    maxHeapSize = '3g'
+    systemProperty 'teafabric.bake.output', bakedJar.absolutePath
+    systemProperty 'fabric.gameVersion', setupValue('minecraft.version') ?: '1.16.5'
+    args '--gameDir', bakeRun.absolutePath, '--version', setupValue('minecraft.version') ?: '1.16.5',
+         '--accessToken', '0'
+    doFirst { bakedJar.parentFile.mkdirs() }
+}
+
+// ---------------------------------------------------------------------------------------------
+// TeaVM: compile baked Minecraft + Fabric + platform layer to WebAssembly GC (or JS fallback).
+// ---------------------------------------------------------------------------------------------
+def teavmTarget = findProperty('teavmTarget') ?: 'wasm-gc'
+def teavmOut = file("build/teavm/${teavmTarget}")
+
+tasks.register('compileWeb', JavaExec) {
+    group = 'teafabric'
+    description = 'Compiles the baked game with TeaVM (-PteavmTarget=wasm-gc|js).'
+    dependsOn ':platform:classes', ':compiler:classes'
+    def platform = project(':platform')
+    classpath = project(':compiler').sourceSets.main.runtimeClasspath
+    mainClass = 'teafabric.compiler.Compile'
+    maxHeapSize = findProperty('teavmHeap') ?: '6g'
+    doFirst {
+        def cp = []
+        cp += platform.sourceSets.main.output.files
+        cp += platform.configurations.teavmProgram.files
+        cp += bakedJar
+        cp += setupJars('fabric.classpath').findAll { it.name.startsWith('sponge-mixin') }
+        // Native-only or replaced libraries: LWJGL and Log4j are reimplemented in :platform.
+        def replaced = ['lwjgl', 'log4j-api', 'log4j-core', 'jinput', 'jutils', 'java-objc-bridge']
+        cp += setupJars('minecraft.libraries').findAll { jar -> !replaced.any { jar.name.startsWith(it) } }
+        args "--target=${teavmTarget}",
+             "--main=teafabric.web.WebMain",
+             "--out=${teavmOut}",
+             "--opt=${findProperty('teavmOpt') ?: 'ADVANCED'}",
+             "--fast=${findProperty('teavmFast') ?: 'false'}",
+             "--debug=${findProperty('teavmDebug') ?: 'false'}",
+             "--obfuscated=${findProperty('teavmObfuscated') ?: 'true'}",
+             "--classpath=${cp.collect { it.absolutePath }.join(File.pathSeparator)}"
+    }
+}
