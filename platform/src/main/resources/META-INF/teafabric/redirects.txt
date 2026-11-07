@@ -54,3 +54,6 @@ net.fabricmc.fabric.impl.client.indigo.renderer.aocalc.VanillaAoHelper initializ
 java.util.regex.Pattern  matcher              (Ljava/lang/CharSequence;)Ljava/util/regex/Matcher; -> teafabric.web.compat.RegexCompat
 java.util.regex.Matcher  replaceAll           (Ljava/lang/String;)Ljava/lang/String;         -> teafabric.web.compat.RegexCompat
 java.util.regex.Matcher  replaceFirst         (Ljava/lang/String;)Ljava/lang/String;         -> teafabric.web.compat.RegexCompat
+net.minecraft.class_156  method_18349         ()Ljava/util/concurrent/Executor;            -> teafabric.web.compat.MinecraftCompat
+net.minecraft.class_156  method_27958         ()Ljava/util/concurrent/Executor;            -> teafabric.web.compat.MinecraftCompat
+net.minecraft.class_156  method_28124         ()Ljava/util/concurrent/Executor;            -> teafabric.web.compat.MinecraftCompat

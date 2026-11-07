@@ -34,6 +34,30 @@ public final class MinecraftCompat {
     public static void initialize(net.minecraft.class_778 blockRenderer) {
     }
 
+    /**
+     * Minecraft's worker pools (Util.getMainWorkerExecutor / getIoWorkerExecutor /
+     * getBootstrapExecutor). With {@code ?threads} the pools run on green threads; by default tasks
+     * run inline on the submitting thread: a browser page has one CPU thread anyway, and inline
+     * execution avoids thousands of fiber switches during resource reloads.
+     */
+    private static final java.util.concurrent.Executor INLINE = Runnable::run;
+
+    private static boolean pooled() {
+        return teafabric.web.Boot.config("threads") != null;
+    }
+
+    public static java.util.concurrent.Executor method_18349() {
+        return pooled() ? net.minecraft.class_156.method_18349() : INLINE;
+    }
+
+    public static java.util.concurrent.Executor method_27958() {
+        return pooled() ? net.minecraft.class_156.method_27958() : INLINE;
+    }
+
+    public static java.util.concurrent.Executor method_28124() {
+        return pooled() ? net.minecraft.class_156.method_28124() : INLINE;
+    }
+
     /** Util.startTimerHack: a Windows timer-resolution workaround (a thread sleeping forever). */
     public static void method_29476() {
     }

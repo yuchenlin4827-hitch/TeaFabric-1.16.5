@@ -22,7 +22,7 @@ public final class Boot {
     private static native Int8Array takeArchive(int i);
 
     @JSBody(params = "key", script = "var v = teafabric.config[key]; return v === undefined || v === null ? null : '' + v;")
-    static native String config(String key);
+    public static native String config(String key);
 
     static void mountFileSystem() throws java.io.IOException {
         int n = archiveCount();

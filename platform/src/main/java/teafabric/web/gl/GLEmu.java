@@ -153,7 +153,16 @@ public final class GLEmu {
     private static final Map<Integer, Integer> intParams = new HashMap<>();
     private static int draws;
 
+    static boolean trace;
+
+    static void trace(String msg) {
+        if (trace) {
+            LogSink.log(0, "TRACE", "GL", msg, null);
+        }
+    }
+
     public static void init(WebGL2RenderingContext context) {
+        trace = teafabric.web.Boot.config("trace") != null;
         gl = context;
         jit = new ShaderJit(context);
         streamVbo = gl.createBuffer();
@@ -534,6 +543,9 @@ public final class GLEmu {
             return;
         }
         draws++;
+        if (trace) {
+            trace("draw mode=" + mode + " count=" + count + " vptr=" + vertexArray.pointer + " vbo=" + vertexArray.buffer);
+        }
         boolean user = currentProgram != 0;
         if (user) {
             UserProgram up = programs.get(currentProgram);
@@ -896,7 +908,18 @@ public final class GLEmu {
 
     public static void texImage2D(int target, int level, int internal, int width, int height, int border,
             int format, int type, Buffer pixels) {
+        if (target == PROXY_TEXTURE_2D) {
+            // Size query only (RenderSystem.maxSupportedTextureSize): never allocate.
+            int max = intParams.getOrDefault(3379, 4096);
+            boolean fits = width <= max && height <= max;
+            proxySize[0] = fits ? width : 0;
+            proxySize[1] = fits ? height : 0;
+            proxySize[2] = fits ? internal : 0;
+            return;
+        }
         int[] f = textureFormat(internal, format, type);
+        trace("texImage2D tex=" + boundTexture[activeTexture] + " lvl=" + level + " " + width + "x" + height
+                + " fmt=" + f[0] + " data=" + (pixels != null));
         ArrayBufferView view = null;
         if (pixels != null && NativeMemory.isNative(pixels)) {
             int bytes = width * height * bytesPerPixel(f[1], f[2]);
@@ -913,6 +936,9 @@ public final class GLEmu {
 
     public static void texSubImage2D(int target, int level, int x, int y, int width, int height, int format,
             int type, long pixels) {
+        trace("texSubImage2D tex=" + boundTexture[activeTexture] + " lvl=" + level + " @" + x + "," + y + " "
+                + width + "x" + height + " ptr=" + pixels + " row=" + unpackRowLength + " skip=" + unpackSkipPixels
+                + "," + unpackSkipRows);
         int bpp = bytesPerPixel(format, type);
         int rowLength = unpackRowLength > 0 ? unpackRowLength : width;
         long bytes = ((long) (unpackSkipRows + height - 1) * rowLength + unpackSkipPixels + width) * bpp;
@@ -940,9 +966,13 @@ public final class GLEmu {
         }
     }
 
+    private static final int PROXY_TEXTURE_2D = 32868;
+    private static final int[] proxySize = new int[3];
+
     public static int getTexLevelParameteri(int target, int level, int pname) {
         int id = boundTexture[activeTexture];
-        int[] s = id > 0 && id < textureSizes.size() ? textureSizes.get(id) : new int[3];
+        int[] s = target == PROXY_TEXTURE_2D ? proxySize
+                : id > 0 && id < textureSizes.size() ? textureSizes.get(id) : new int[3];
         int shift = Math.max(0, level);
         switch (pname) {
             case 4096: return Math.max(1, s[0] >> shift);
@@ -1034,6 +1064,9 @@ public final class GLEmu {
         return v == null ? 0 : jsInt(v);
     }
 
+    @org.teavm.jso.JSBody(params = "gl", script = "var r = gl.getParameter(gl.RENDERER); return r == null ? 'unknown' : String(r);")
+    private static native String rendererName(WebGL2RenderingContext gl);
+
     @org.teavm.jso.JSBody(params = "v", script = "return typeof v === 'number' ? v : (v ? 1 : 0);")
     private static native int jsInt(JSObject v);
 
@@ -1076,10 +1109,8 @@ public final class GLEmu {
     public static String getString(int name) {
         switch (name) {
             case 7936: return "TeaFabric";
-            case 7937: {
-                String r = gl.getParameterString(WebGL2RenderingContext.RENDERER);
-                return "WebGL 2 (" + r + ")";
-            }
+            case 7937:
+                return "WebGL 2 (" + rendererName(gl) + ")";
             case 7938: return "2.1 TeaFabric fixed-function emulation on WebGL 2.0";
             case 7939: return "GL_ARB_framebuffer_object GL_EXT_framebuffer_blit";
             case 35724: return "1.20";

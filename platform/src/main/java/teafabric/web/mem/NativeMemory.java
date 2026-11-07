@@ -24,6 +24,9 @@ public final class NativeMemory {
     private static native ArrayBuffer linearMemory();
 
     public static long malloc(long size) {
+        if (size > 64L << 20) {
+            teafabric.web.log.LogSink.log(2, "WARN", "NativeMemory", "large malloc " + size, null);
+        }
         Address a = Heap.alloc((int) Math.max(1, size));
         if (a == null) {
             throw new OutOfMemoryError("Native heap exhausted allocating " + size + " bytes");
