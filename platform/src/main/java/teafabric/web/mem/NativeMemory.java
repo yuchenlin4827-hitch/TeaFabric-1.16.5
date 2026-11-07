@@ -2,7 +2,6 @@ package teafabric.web.mem;
 
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
-import org.teavm.classlib.java.nio.TTeaFabricBufferAccess;
 import org.teavm.interop.Address;
 import org.teavm.interop.Import;
 import org.teavm.jso.JSBody;
@@ -61,7 +60,7 @@ public final class NativeMemory {
     }
 
     public static ByteBuffer wrap(long address, int capacity) {
-        return TTeaFabricBufferAccess.wrap((int) address, capacity);
+        return java.nio.TeaFabricBufferAccess.wrap((int) address, capacity);
     }
 
     /** Address of a direct buffer's current position (LWJGL's memAddress semantics). */
@@ -69,7 +68,7 @@ public final class NativeMemory {
         if (buffer == null) {
             return 0;
         }
-        int a = TTeaFabricBufferAccess.address(buffer);
+        int a = java.nio.TeaFabricBufferAccess.address(buffer);
         if (a == 0) {
             throw new IllegalArgumentException("Not a direct buffer: " + buffer);
         }
@@ -77,11 +76,11 @@ public final class NativeMemory {
     }
 
     public static long baseAddress(Buffer buffer) {
-        return Integer.toUnsignedLong(TTeaFabricBufferAccess.baseAddress(buffer));
+        return Integer.toUnsignedLong(java.nio.TeaFabricBufferAccess.baseAddress(buffer));
     }
 
     public static boolean isNative(Buffer buffer) {
-        return buffer != null && TTeaFabricBufferAccess.baseAddress(buffer) != 0;
+        return buffer != null && java.nio.TeaFabricBufferAccess.baseAddress(buffer) != 0;
     }
 
     public static byte getByte(long p) {
