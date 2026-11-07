@@ -140,3 +140,73 @@ tasks.register('compileWeb', JavaExec) {
              "--classpath=${cp.collect { it.absolutePath }.join(File.pathSeparator)}"
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Web bundle: build/web = page + Wasm + runtime + resource archives. Contains Minecraft data:
+// serve it locally for yourself, do not publish it.
+// ---------------------------------------------------------------------------------------------
+def webOut = file('build/web')
+
+tasks.register('webClasspathZip', Zip) {
+    group = 'teafabric'
+    description = 'Non-class resources of the baked jar (vanilla assets/data + mod resources).'
+    from(zipTree(bakedJar)) {
+        exclude '**/*.class', 'META-INF/**'
+    }
+    entryCompression = ZipEntryCompression.STORED
+    archiveFileName = 'classpath.zip'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    destinationDirectory = new File(webOut, 'data')
+}
+
+tasks.register('webAssetsZip', Zip) {
+    group = 'teafabric'
+    description = 'Asset index and non-sound objects (sounds are loaded on demand).'
+    entryCompression = ZipEntryCompression.STORED
+    archiveFileName = 'assets.zip'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    destinationDirectory = new File(webOut, 'data')
+    def indexFile = setupValue('minecraft.assetIndex')
+    def assetsDir = setupValue('minecraft.assetsDir')
+    if (indexFile != null) {
+        def index = new groovy.json.JsonSlurper().parse(new File(indexFile))
+        from(new File(indexFile)) { into 'indexes' }
+        index.objects.each { name, obj ->
+            // -PwebLanguages=all ships every translation; by default only English (in the client jar)
+            def langs = (findProperty('webLanguages') ?: '').toString()
+            boolean wantLang = !name.startsWith('minecraft/lang/') || langs == 'all'
+                    || langs.split(',').any { name == "minecraft/lang/${it}.json" }
+            if (!name.endsWith('.ogg') && wantLang && !name.startsWith('minecraft/resourcepacks/')) {
+                def h = obj.hash
+                def f = new File(assetsDir, "objects/${h.substring(0, 2)}/${h}")
+                if (f.exists()) {
+                    from(f) { into "objects/${h.substring(0, 2)}" }
+                }
+            }
+        }
+    }
+}
+
+tasks.register('packageWeb', Copy) {
+    group = 'teafabric'
+    description = 'Assembles build/web (run: python3 -m http.server -d build/web 8080).'
+    dependsOn 'webClasspathZip', 'webAssetsZip'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from('web')
+    from(teavmOut) {
+        include 'classes.wasm'
+        into 'teavm'
+    }
+    from({ zipTree(project(':compiler').configurations.runtimeClasspath.files.find { it.name.startsWith('teavm-core') }) }) {
+        include 'org/teavm/backend/wasm/wasm-gc-runtime.js'
+        eachFile { it.path = 'teavm/classes.wasm-runtime.js' }
+        includeEmptyDirs = false
+    }
+    into webOut
+}
+
+tasks.register('buildWeb') {
+    group = 'teafabric'
+    description = 'Full pipeline: setup -> bake -> TeaVM Wasm GC -> build/web.'
+    dependsOn 'packageWeb'
+}

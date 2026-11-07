@@ -54,6 +54,8 @@ public final class AutoStub implements Opcodes {
     private final Map<String, Integer> invokeOpcode = new HashMap<>(); // owner.name+desc -> opcode
     private final Map<String, String> fieldDesc = new HashMap<>();     // owner.name -> desc
     private final Map<String, Boolean> fieldStatic = new HashMap<>();
+    /** Types TeaVM does not report when missing: catch clauses, checkcast and instanceof targets. */
+    private final Set<String> silentTypes = new TreeSet<>();
     private final ClassLoader host;
 
     private final Map<String, StubClass> stubs = new TreeMap<>();     // original internal name -> stub
@@ -105,6 +107,7 @@ public final class AutoStub implements Opcodes {
         for (String r : requests) {
             stub.request(r.split("\t"));
         }
+        stub.stubSilentTypes();
         stub.write(Path.of(o.get("out")));
         Setup.log("AutoStub: " + requests.size() + " requests (" + (requests.size() - before) + " new), "
                 + stub.stubs.size() + " stub classes, " + stub.redirects.size() + " redirected owners, "
@@ -151,6 +154,21 @@ public final class AutoStub implements Opcodes {
                     @Override
                     public void visitMethodInsn(int opcode, String owner, String mname, String mdesc, boolean itf) {
                         invokeOpcode.putIfAbsent(owner + "." + mname + mdesc, opcode);
+                    }
+
+                    @Override
+                    public void visitTryCatchBlock(org.objectweb.asm.Label start, org.objectweb.asm.Label end,
+                            org.objectweb.asm.Label handler, String type) {
+                        if (type != null) {
+                            silentTypes.add(type);
+                        }
+                    }
+
+                    @Override
+                    public void visitTypeInsn(int opcode, String type) {
+                        if ((opcode == CHECKCAST || opcode == INSTANCEOF) && !type.startsWith("[")) {
+                            silentTypes.add(type);
+                        }
                     }
 
                     @Override
@@ -276,6 +294,15 @@ public final class AutoStub implements Opcodes {
             }
             default:
                 break;
+        }
+    }
+
+    /** JDK types used only in catch clauses / casts that are missing from TeaVM's class library. */
+    private void stubSilentTypes() {
+        for (String type : silentTypes) {
+            if ((type.startsWith("java/") || type.startsWith("javax/")) && !exists(type) && hostClass(type) != null) {
+                stub(type);
+            }
         }
     }
 

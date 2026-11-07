@@ -16,4 +16,5 @@ tasks.register('printClasspath') {
 
 dependencies {
     compileOnly "org.teavm:teavm-core:${teavmVersion}"
+    compileOnly "org.teavm:teavm-relocated-libs-hppc:${teavmVersion}"
 }
