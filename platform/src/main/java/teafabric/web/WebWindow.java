@@ -77,7 +77,8 @@ public final class WebWindow {
         void run();
     }
 
-    @JSBody(params = "f", script = "requestAnimationFrame(function() { f(); });")
+    @JSBody(params = "f", script = "teafabric.rafRequests = (teafabric.rafRequests || 0) + 1;"
+            + " requestAnimationFrame(function() { teafabric.rafCallbacks = (teafabric.rafCallbacks || 0) + 1; f(); });")
     private static native void requestAnimationFrame(Callback f);
 
     @JSBody(params = {"f", "ms"}, script = "setTimeout(function() { f(); }, ms);")
@@ -88,7 +89,12 @@ public final class WebWindow {
     public static native void waitForFrame();
 
     private static void waitForFrame(AsyncCallback<Void> callback) {
-        requestAnimationFrame(() -> callback.complete(null));
+        try {
+            requestAnimationFrame(() -> callback.complete(null));
+        } catch (Throwable t) {
+            teafabric.web.log.LogSink.log(3, "ERROR", "TeaFabric", "waitForFrame failed", t);
+            callback.error(t);
+        }
     }
 
     /** Suspends the calling green thread for {@code ms} milliseconds, letting the page process events. */
@@ -96,6 +102,11 @@ public final class WebWindow {
     public static native void yieldMillis(int ms);
 
     private static void yieldMillis(int ms, AsyncCallback<Void> callback) {
-        setTimeout(() -> callback.complete(null), ms);
+        try {
+            setTimeout(() -> callback.complete(null), ms);
+        } catch (Throwable t) {
+            teafabric.web.log.LogSink.log(3, "ERROR", "TeaFabric", "yieldMillis failed", t);
+            callback.error(t);
+        }
     }
 }
