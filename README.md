@@ -105,6 +105,7 @@ Useful properties: `-PteavmFast=true` (fast dependency analysis), `-PteavmOpt=SI
 Page switches (debugging): `?log` (log overlay), `?username=Name`, `?threads` (Minecraft worker pools
 on green threads instead of inline), `?trace` (GL upload/draw trace), `?beacon` (log lines are sent to
 the HTTP server, survives renderer crashes), `?nogl`, `?noaudio`, `?nobuiltins`, `?nodeobf`,
+`?nofinalize` / `?noweak` (no GC callbacks into Wasm / strong weak references),
 `?vanillaMain` (start through `net.minecraft.client.main.Main`).
 
 ## Status

@@ -251,6 +251,13 @@
   }
   if (params.has('nobuiltins')) disableStringBuiltins();
   if (params.has('noaudio')) { window.AudioContext = undefined; window.webkitAudioContext = undefined; }
+  // Engine A/B switches: ?nofinalize stops GC callbacks re-entering Wasm, ?noweak makes weak references strong.
+  if (params.has('nofinalize')) {
+    window.FinalizationRegistry = function () { this.register = function () {}; this.unregister = function () {}; };
+  }
+  if (params.has('noweak')) {
+    window.WeakRef = function (v) { this.deref = function () { return v; }; };
+  }
 
   async function start() {
     if (typeof WebAssembly !== 'object' || !TeaVM || !TeaVM.wasmGC) {
