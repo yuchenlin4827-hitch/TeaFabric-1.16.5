@@ -59,3 +59,5 @@ net.minecraft.class_156  method_27958         ()Ljava/util/concurrent/Executor; 
 net.minecraft.class_156  method_28124         ()Ljava/util/concurrent/Executor;            -> teafabric.web.compat.MinecraftCompat
 # Log crash reports when they are created (see MinecraftCompat.constructclass_148)
 net.minecraft.class_148   <init>               (Lnet/minecraft/class_128;)V                 -> teafabric.web.compat.MinecraftCompat
+# Direct buffer accounting (heap exhaustion diagnostics)
+java.nio.ByteBuffer       allocateDirect       (I)Ljava/nio/ByteBuffer;                     -> teafabric.web.compat.BufferCompat
