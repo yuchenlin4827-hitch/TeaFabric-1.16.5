@@ -87,7 +87,7 @@ public final class MemoryStack implements AutoCloseable {
     public long nmalloc(int alignment, int size) {
         int newPointer = (pointer - size) & ~(Math.max(alignment, 1) - 1);
         if (newPointer < 0) {
-            throw new OutOfMemoryError("Out of stack space.");
+            throw NativeMemory.oom("Out of stack space (MemoryStack frame " + frameIndex + ", requested " + size + ")");
         }
         pointer = newPointer;
         return base + newPointer;

@@ -29,7 +29,7 @@ public final class NativeMemory {
         }
         Address a = Heap.alloc((int) Math.max(1, size));
         if (a == null) {
-            throw new OutOfMemoryError("Native heap exhausted allocating " + size + " bytes");
+            throw oom("Native heap exhausted allocating " + size + " bytes");
         }
         return Integer.toUnsignedLong(a.toInt());
     }
@@ -47,9 +47,16 @@ public final class NativeMemory {
         }
         Address a = Heap.realloc(Address.fromInt((int) ptr), (int) Math.max(1, size));
         if (a == null) {
-            throw new OutOfMemoryError("Native heap exhausted reallocating " + size + " bytes");
+            throw oom("Native heap exhausted reallocating " + size + " bytes");
         }
         return Integer.toUnsignedLong(a.toInt());
+    }
+
+    /** Logs before throwing: Minecraft's OutOfMemoryError handler only logs after its clean-up. */
+    public static OutOfMemoryError oom(String message) {
+        OutOfMemoryError error = new OutOfMemoryError(message);
+        teafabric.web.log.LogSink.log(3, "ERROR", "NativeMemory", message, error);
+        return error;
     }
 
     public static void free(long ptr) {
