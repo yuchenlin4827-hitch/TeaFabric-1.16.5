@@ -591,10 +591,31 @@ public class TObject {
                 }
                 timerId = -1;
             }
+            // TeaFabric patch: like Object.wait on a JVM, re-acquire the monitor before throwing
+            // InterruptedException. TeaVM 0.16.0 resumed the thread without it, so the enclosing
+            // synchronized block failed in monitorExit with IllegalMonitorStateException (this killed
+            // Minecraft's sound thread when SoundExecutor.restart() interrupted it).
+            AsyncCallback<Void> rethrow = new AsyncCallback<Void>() {
+                @Override
+                public void complete(Void result) {
+                    callback.error(new TInterruptedException());
+                }
+
+                @Override
+                public void error(Throwable e) {
+                    callback.error(e);
+                }
+            };
             if (PlatformDetector.isLowLevel() || PlatformDetector.isWebAssemblyGC()) {
-                EventQueue.offer(() -> callback.error(new TInterruptedException()));
+                EventQueue.offer(() -> {
+                    TThread.setCurrentThread(currentThread);
+                    monitorEnterWait(obj, lockCount, rethrow);
+                });
             } else {
-                Platform.postpone(() -> callback.error(new TInterruptedException()));
+                Platform.postpone(() -> {
+                    TThread.setCurrentThread(currentThread);
+                    monitorEnterWait(obj, lockCount, rethrow);
+                });
             }
         }
     }

@@ -61,3 +61,5 @@ net.minecraft.class_156  method_28124         ()Ljava/util/concurrent/Executor; 
 net.minecraft.class_148   <init>               (Lnet/minecraft/class_128;)V                 -> teafabric.web.compat.MinecraftCompat
 # Direct buffer accounting (heap exhaustion diagnostics)
 java.nio.ByteBuffer       allocateDirect       (I)Ljava/nio/ByteBuffer;                     -> teafabric.web.compat.BufferCompat
+# Assertions off, like a JVM without -ea
+java.lang.Class           desiredAssertionStatus ()Z                                        -> teafabric.web.compat.LangCompat
