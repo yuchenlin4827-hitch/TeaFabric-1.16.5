@@ -22,6 +22,7 @@ import org.teavm.model.MethodReference;
 import org.teavm.model.Program;
 import org.teavm.model.ValueType;
 import org.teavm.model.Variable;
+import org.teavm.model.instructions.ConstructInstruction;
 import org.teavm.model.instructions.InvocationType;
 import org.teavm.model.instructions.InvokeInstruction;
 
@@ -84,6 +85,10 @@ public class RedirectTransformer implements ClassHolderTransformer {
             }
         }
         for (MethodHolder method : cls.getMethods()) {
+            if (method.hasModifier(org.teavm.model.ElementModifier.NATIVE) && isPlainJni(method)) {
+                stubNative(method, context);
+                continue;
+            }
             Program program = method.getProgram();
             if (program == null) {
                 continue;
@@ -99,10 +104,34 @@ public class RedirectTransformer implements ClassHolderTransformer {
         }
     }
 
+    /** A JNI native: no TeaVM interop / generator / JSO annotation on it. */
+    private static boolean isPlainJni(MethodHolder method) {
+        for (org.teavm.model.AnnotationHolder a : method.getAnnotations().all()) {
+            String name = a.getType();
+            if (name.startsWith("org.teavm.")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Library JNI methods (Netty epoll/unix transport, JNA) cannot link in Wasm: make them throw. */
+    private static void stubNative(MethodHolder method, ClassHolderTransformerContext context) {
+        method.getModifiers().remove(org.teavm.model.ElementModifier.NATIVE);
+        org.teavm.model.emit.ProgramEmitter pe = org.teavm.model.emit.ProgramEmitter.create(method,
+                context.getHierarchy());
+        pe.construct(UnsatisfiedLinkError.class, pe.constant(method.getReference() + " is a JNI method; "
+                + "native libraries are not available in the browser")).raise();
+    }
+
     private void rewrite(InvokeInstruction insn) {
         MethodReference ref = insn.getMethod();
         String target = rules.get(ref);
         if (target == null) {
+            return;
+        }
+        if (ref.getName().equals("<init>")) {
+            rewriteConstructor(insn, ref, target);
             return;
         }
         if (insn.getInstance() == null) {
@@ -124,5 +153,37 @@ public class RedirectTransformer implements ClassHolderTransformer {
         insn.setType(InvocationType.SPECIAL);
         insn.setMethod(new MethodReference(target, ref.getName(), newSig));
         insn.setArguments(newArgs);
+    }
+
+    /**
+     * {@code v = new X; v.<init>(args)} becomes {@code v = target.constructX(args)}. Super-constructor
+     * calls (no matching {@code new}) are left alone.
+     */
+    private void rewriteConstructor(InvokeInstruction insn, MethodReference ref, String target) {
+        Variable instance = insn.getInstance();
+        Program program = insn.getProgram();
+        ConstructInstruction construct = null;
+        for (int i = 0; i < program.basicBlockCount() && construct == null; i++) {
+            for (Instruction other : program.basicBlockAt(i)) {
+                if (other instanceof ConstructInstruction && ((ConstructInstruction) other).getReceiver() == instance) {
+                    construct = (ConstructInstruction) other;
+                    break;
+                }
+            }
+        }
+        if (construct == null) {
+            return;
+        }
+        construct.delete();
+        String owner = ref.getClassName();
+        String simple = owner.substring(owner.lastIndexOf('.') + 1).replace('$', '_');
+        ValueType[] params = ref.getParameterTypes();
+        ValueType[] sig = new ValueType[params.length + 1];
+        System.arraycopy(params, 0, sig, 0, params.length);
+        sig[params.length] = ValueType.object(owner);
+        insn.setInstance(null);
+        insn.setType(InvocationType.SPECIAL);
+        insn.setReceiver(instance);
+        insn.setMethod(new MethodReference(target, "construct" + simple, sig));
     }
 }

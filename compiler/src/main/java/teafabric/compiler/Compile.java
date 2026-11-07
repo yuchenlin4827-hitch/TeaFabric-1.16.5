@@ -34,6 +34,24 @@ import org.teavm.vm.TeaVMOptimizationLevel;
  */
 public final class Compile {
     public static void main(String[] args) throws Exception {
+        // TeaVM's analyses recurse over the call graph; Minecraft's is deep enough to need a big stack.
+        Throwable[] failure = new Throwable[1];
+        Thread worker = new Thread(null, () -> {
+            try {
+                run(args);
+            } catch (Throwable t) {
+                failure[0] = t;
+            }
+        }, "teavm", 2L << 30);
+        worker.start();
+        worker.join();
+        if (failure[0] != null) {
+            failure[0].printStackTrace();
+            System.exit(1);
+        }
+    }
+
+    private static void run(String[] args) throws Exception {
         Map<String, String> opts = new TreeMap<>();
         for (String arg : args) {
             int eq = arg.indexOf('=');
@@ -100,6 +118,7 @@ public final class Compile {
 
         Files.createDirectories(outDir.toPath());
         writeMissingReport(tool, new File(outDir, "missing.txt"));
+        writeMissingTsv(tool, new File(outDir, "missing.tsv"));
         int limit = Integer.parseInt(opts.getOrDefault("problem-limit", "400"));
         List<Problem> severe = tool.getProblemProvider().getSevereProblems();
         if (!severe.isEmpty()) {
@@ -114,6 +133,31 @@ public final class Compile {
         for (File f : tool.getGeneratedFiles()) {
             System.out.println("[teavm] wrote " + f + " (" + f.length() / 1024 + " KiB)");
         }
+    }
+
+    /** Machine-readable list for the stub generator: kind, owner, name, descriptor. */
+    private static void writeMissingTsv(TeaVMTool tool, File file) throws IOException {
+        java.util.Set<String> lines = new java.util.TreeSet<>();
+        for (Problem p : tool.getProblemProvider().getProblems()) {
+            if (p.getSeverity() != ProblemSeverity.ERROR) {
+                continue;
+            }
+            String text = p.getText();
+            for (Object param : p.getParams()) {
+                if (param instanceof org.teavm.model.MethodReference && text.contains("was not found")) {
+                    org.teavm.model.MethodReference m = (org.teavm.model.MethodReference) param;
+                    lines.add("method\t" + m.getClassName() + "\t" + m.getName() + "\t" + m.getDescriptor()
+                            .toString().substring(m.getName().length()));
+                } else if (param instanceof org.teavm.model.FieldReference && text.contains("was not found")) {
+                    org.teavm.model.FieldReference f = (org.teavm.model.FieldReference) param;
+                    lines.add("field\t" + f.getClassName() + "\t" + f.getFieldName());
+                } else if (param instanceof String && (text.contains("was not found")
+                        || text.contains("missing in the classpath"))) {
+                    lines.add("class\t" + param);
+                }
+            }
+        }
+        java.nio.file.Files.write(file.toPath(), lines, StandardCharsets.UTF_8);
     }
 
     /** Groups problems by their rendered text (e.g. "Method X was not found") and records one caller. */

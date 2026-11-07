@@ -84,23 +84,50 @@ tasks.register('bake', JavaExec) {
 def teavmTarget = findProperty('teavmTarget') ?: 'wasm-gc'
 def teavmOut = file("build/teavm/${teavmTarget}")
 
+def stubsJar = file('.cache/stubs/stubs.jar')
+
+// Program class path for TeaVM, in priority order (first entry wins for duplicate classes).
+def programClasspath = {
+    def platform = project(':platform')
+    def cp = []
+    cp += platform.sourceSets.main.output.files
+    cp += platform.sourceSets.legacy.output.files
+    cp += platform.configurations.teavmProgram.files
+    cp += bakedJar
+    cp += setupJars('fabric.classpath').findAll { it.name.startsWith('sponge-mixin') }
+    // Native-only or replaced libraries: LWJGL, Log4j and text2speech/OSHI are reimplemented in :platform.
+    def replaced = ['lwjgl', 'log4j-api', 'log4j-core', 'jinput', 'jutils', 'java-objc-bridge', 'text2speech',
+                    'oshi-core']
+    cp += setupJars('minecraft.libraries').findAll { jar -> !replaced.any { jar.name.startsWith(it) } }
+    return cp.findAll { it.exists() }
+}
+
+tasks.register('stubWeb', JavaExec) {
+    group = 'teafabric'
+    description = 'Generates throwing stubs for browser-impossible APIs reported missing by compileWeb.'
+    dependsOn ':tools:classes', ':platform:classes'
+    classpath = project(':tools').sourceSets.main.runtimeClasspath
+    mainClass = 'teafabric.tools.AutoStub'
+    doFirst {
+        args "--missing=${teavmOut}/missing.tsv",
+             "--state=${file('.cache/stubs/stubs.tsv')}",
+             "--out=${stubsJar}",
+             "--classpath=${programClasspath().collect { it.absolutePath }.join(File.pathSeparator)}"
+    }
+}
+
 tasks.register('compileWeb', JavaExec) {
     group = 'teafabric'
     description = 'Compiles the baked game with TeaVM (-PteavmTarget=wasm-gc|js).'
     dependsOn ':platform:classes', ':compiler:classes'
-    def platform = project(':platform')
     classpath = project(':compiler').sourceSets.main.runtimeClasspath
     mainClass = 'teafabric.compiler.Compile'
     maxHeapSize = findProperty('teavmHeap') ?: '6g'
     doFirst {
-        def cp = []
-        cp += platform.sourceSets.main.output.files
-        cp += platform.configurations.teavmProgram.files
-        cp += bakedJar
-        cp += setupJars('fabric.classpath').findAll { it.name.startsWith('sponge-mixin') }
-        // Native-only or replaced libraries: LWJGL and Log4j are reimplemented in :platform.
-        def replaced = ['lwjgl', 'log4j-api', 'log4j-core', 'jinput', 'jutils', 'java-objc-bridge']
-        cp += setupJars('minecraft.libraries').findAll { jar -> !replaced.any { jar.name.startsWith(it) } }
+        def cp = programClasspath()
+        if (stubsJar.exists()) {
+            cp += stubsJar // lowest priority: only fills gaps
+        }
         args "--target=${teavmTarget}",
              "--main=teafabric.web.WebMain",
              "--out=${teavmOut}",
@@ -108,6 +135,8 @@ tasks.register('compileWeb', JavaExec) {
              "--fast=${findProperty('teavmFast') ?: 'false'}",
              "--debug=${findProperty('teavmDebug') ?: 'false'}",
              "--obfuscated=${findProperty('teavmObfuscated') ?: 'true'}",
+             "--min-heap=${findProperty('teavmMinHeap') ?: '64'}",
+             "--max-heap=${findProperty('teavmMaxHeap') ?: '1024'}",
              "--classpath=${cp.collect { it.absolutePath }.join(File.pathSeparator)}"
     }
 }

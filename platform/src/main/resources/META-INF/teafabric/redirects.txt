@@ -31,3 +31,4 @@ java.lang.invoke.MethodHandles lookup         ()Ljava/lang/invoke/MethodHandles$
 java.lang.invoke.MethodHandles publicLookup   ()Ljava/lang/invoke/MethodHandles$Lookup;     -> teafabric.web.compat.InvokeCompat
 java.lang.invoke.MethodHandle invokeExact     ()Z                                          -> teafabric.web.compat.InvokeCompat
 java.lang.invoke.MethodHandle invoke          (J)V                                         -> teafabric.web.compat.InvokeCompat
+java.lang.String         <init>               ([BIII)V                                     -> teafabric.web.compat.LangCompat

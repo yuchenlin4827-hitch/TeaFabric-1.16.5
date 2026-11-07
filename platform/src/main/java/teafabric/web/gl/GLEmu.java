@@ -12,7 +12,6 @@ import org.teavm.jso.JSObject;
 import org.teavm.jso.typedarrays.ArrayBufferView;
 import org.teavm.jso.typedarrays.Float32Array;
 import org.teavm.jso.typedarrays.Int32Array;
-import org.teavm.jso.typedarrays.Uint32Array;
 import org.teavm.jso.webgl.WebGL2RenderingContext;
 import org.teavm.jso.webgl.WebGLBuffer;
 import org.teavm.jso.webgl.WebGLFramebuffer;
@@ -759,7 +758,7 @@ public final class GLEmu {
             return;
         }
         int capacity = Math.max(quads, Math.max(4096, quadIboQuads * 2));
-        Uint32Array indices = Uint32Array.create(capacity * 6);
+        Int32Array indices = Int32Array.create(capacity * 6); // same bytes as UNSIGNED_INT below 2^31
         for (int q = 0; q < capacity; q++) {
             int v = q * 4;
             int i = q * 6;

@@ -274,8 +274,10 @@ public final class Baker implements PreLaunchEntrypoint {
             int offset = reader.getItem(i);
             if (offset > 0 && reader.b[offset - 1] == 7 /* CONSTANT_Class */) {
                 String name = reader.readUTF8(offset, buf);
-                if (name != null && name.startsWith(SYNTHETIC_PREFIX) && !classes.containsKey(name)
-                        && seen.add(name)) {
+                // Mixin generates synthetic argument bundles and copies of mixin inner classes
+                // (switch maps, anonymous classes) named Target$Anonymous$<hash> on demand.
+                if (name != null && (name.startsWith(SYNTHETIC_PREFIX) || name.contains("$Anonymous$"))
+                        && !classes.containsKey(name) && seen.add(name)) {
                     queue.add(name);
                 }
             }

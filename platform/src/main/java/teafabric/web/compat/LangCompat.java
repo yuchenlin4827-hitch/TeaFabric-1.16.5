@@ -24,8 +24,18 @@ public final class LangCompat {
 
     /** There is no process to exit; stop the game loop and tell the page. */
     public static void exit(int status) {
-        teafabric.web.WebMain.requestExit(status);
-        throw new ThreadDeath();
+        throw teafabric.web.WebMain.requestExit(status);
+    }
+
+    /** The deprecated String(byte[] ascii, int hibyte, int offset, int count) constructor. */
+    @SuppressWarnings("unused")
+    public static String constructString(byte[] ascii, int hibyte, int offset, int count) {
+        char[] chars = new char[count];
+        int hi = (hibyte & 0xff) << 8;
+        for (int i = 0; i < count; i++) {
+            chars[i] = (char) (hi | (ascii[offset + i] & 0xff));
+        }
+        return new String(chars);
     }
 
     // ---- Class
