@@ -1,9 +1,13 @@
 package teafabric.compiler.wasm;
 
 import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.teavm.backend.wasm.model.WasmBlockType;
 import org.teavm.backend.wasm.model.WasmFunction;
+import org.teavm.backend.wasm.model.WasmLocal;
 import org.teavm.backend.wasm.model.WasmModule;
 import org.teavm.backend.wasm.model.instruction.*;
 
@@ -12,19 +16,21 @@ import org.teavm.backend.wasm.model.instruction.*;
  *
  * <p>TeaVM emits the module start function ({@code teavm@initializer}: class metadata, vtables, static
  * field defaults for every class) and the reflection table builder ({@code teavm@initReflection}) as
- * single functions — about 4 MB and 3 MB of code for Minecraft. Executing them once exhausts V8's
- * dynamic-tiering budget, so V8 queues them for its optimising compiler on a background thread, which
- * then runs out of zone memory ("V8 process OOM (Zone)") and kills the renderer. Each piece produced here
- * is small, runs once and is never worth optimising.
+ * single functions — about 4 MB and 3 MB of code for Minecraft — and huge class initialisers such as
+ * {@code Blocks.<clinit>} (230 KB, tens of thousands of strict-mode null checks). When V8 tiers such a
+ * function up, Turboshaft's Wasm GC type analysis runs out of zone memory on a background thread
+ * ("V8 process OOM (Zone)") and the renderer dies; this was confirmed with
+ * {@code --wasm-tier-up-filter=<Blocks.<clinit>>}. Small pieces compile fine.
  *
- * <p>Only functions of type {@code () -> void} without locals are split, and only at top-level points
- * where the operand stack is empty, so every piece is a sequence of complete statements. Functions that
- * return early, branch to the function body or contain anything whose stack effect is not known are
- * left untouched.
+ * <p>Only functions of type {@code () -> void} are split, and only at top-level points where the operand
+ * stack is empty and no local variable carries a value across (backward liveness over the top-level
+ * instructions; writes inside nested blocks are conservatively not counted as definite). Each piece gets
+ * its own copies of the locals it uses. Functions that return early, branch to the function body or contain
+ * anything whose stack effect is not known (e.g. coroutine state machines) are left untouched.
  */
 public final class FunctionSplitter {
-    private static final int MIN_SIZE = 40_000;
-    private static final int CHUNK_SIZE = 4_000;
+    private static final int MIN_SIZE = 8_000;
+    private static final int CHUNK_SIZE = 3_000;
 
     private FunctionSplitter() {
     }
@@ -35,19 +41,26 @@ public final class FunctionSplitter {
             if (function.getImportName() == null
                     && function.getType().getParameterTypes().isEmpty()
                     && function.getType().getReturnTypes().isEmpty()
-                    && function.getLocalVariables().isEmpty()
                     && size(function.getBody()) >= MIN_SIZE) {
                 candidates.add(function);
             }
         }
+        int split = 0;
+        int pieces = 0;
         for (WasmFunction function : candidates) {
             int parts = split(module, function);
             if (parts > 0) {
-                System.out.println("[teavm] split " + function.getName() + " into " + parts + " functions");
+                split++;
+                pieces += parts;
+                if (parts >= 20) {
+                    System.out.println("[teavm] split " + function.getName() + " into " + parts + " functions");
+                }
             } else {
                 System.out.println("[teavm] could not split " + function.getName());
             }
         }
+        System.out.println("[teavm] split " + split + " of " + candidates.size() + " large functions into "
+                + pieces + " pieces");
     }
 
     private static int split(WasmModule module, WasmFunction function) {
@@ -55,12 +68,20 @@ public final class FunctionSplitter {
         if (!splittable(body, body)) {
             return 0;
         }
-        // Plan cut points first (instruction after which the stack is empty and the chunk is big enough).
-        StackEffect effect = new StackEffect();
-        List<WasmInstruction> cuts = new ArrayList<>();
-        int height = 0;
-        int chunk = 0;
+        // Top-level instructions, their stack heights and the locals live between them.
+        List<WasmInstruction> insns = new ArrayList<>();
         for (WasmInstruction insn = body.getFirst(); insn != null; insn = insn.getNext()) {
+            insns.add(insn);
+        }
+        int n = insns.size();
+        if (n > 0 && insns.get(n - 1) instanceof WasmReturn) {
+            n--; // a final return stays in the last piece, after which the original function ends anyway
+        }
+        StackEffect effect = new StackEffect();
+        boolean[] stackEmptyAfter = new boolean[n];
+        int height = 0;
+        for (int i = 0; i < n; i++) {
+            WasmInstruction insn = insns.get(i);
             if (insn.isTerminating()) {
                 return 0;
             }
@@ -73,13 +94,34 @@ public final class FunctionSplitter {
             if (height < 0) {
                 return 0;
             }
-            chunk += size(insn);
-            if (height == 0 && chunk >= CHUNK_SIZE) {
-                cuts.add(insn);
+            stackEmptyAfter[i] = height == 0;
+        }
+        if (height != 0) {
+            return 0;
+        }
+        boolean[] noLiveAfter = new boolean[n];
+        BitSet live = new BitSet();
+        for (int i = n - 1; i >= 0; i--) {
+            noLiveAfter[i] = live.isEmpty();
+            WasmInstruction insn = insns.get(i);
+            if (insn instanceof WasmSetLocal) {
+                live.clear(((WasmSetLocal) insn).getLocal().getIndex());
+            } else if (insn instanceof WasmTeeLocal) {
+                live.clear(((WasmTeeLocal) insn).getLocal().getIndex());
+            } else {
+                collectReads(insn, live);
+            }
+        }
+        List<WasmInstruction> cuts = new ArrayList<>();
+        int chunk = 0;
+        for (int i = 0; i < n; i++) {
+            chunk += size(insns.get(i));
+            if (chunk >= CHUNK_SIZE && stackEmptyAfter[i] && noLiveAfter[i]) {
+                cuts.add(insns.get(i));
                 chunk = 0;
             }
         }
-        if (height != 0 || cuts.size() < 2) {
+        if (cuts.size() < 2) {
             return 0;
         }
         WasmInstructionList original = new WasmInstructionList();
@@ -87,15 +129,19 @@ public final class FunctionSplitter {
         int index = 0;
         int cut = 0;
         WasmFunction part = null;
+        Map<WasmLocal, WasmLocal> locals = new HashMap<>();
         for (WasmInstruction insn = original.getFirst(); insn != null; ) {
             WasmInstruction next = insn.getNext();
             if (part == null) {
                 part = new WasmFunction(function.getType());
                 part.setName(function.getName() + "@part" + index++);
+                part.setJavaMethod(function.getJavaMethod());
                 module.functions.add(part);
                 body.add(new WasmCall(part));
+                locals.clear();
             }
             insn.delete();
+            remapLocals(insn, part, locals);
             part.getBody().add(insn);
             if (cut < cuts.size() && insn == cuts.get(cut)) {
                 cut++;
@@ -106,10 +152,66 @@ public final class FunctionSplitter {
         return index;
     }
 
+    /** Locals that {@code insn} (including nested code) may read. */
+    private static void collectReads(WasmInstruction insn, BitSet out) {
+        if (insn instanceof WasmGetLocal) {
+            out.set(((WasmGetLocal) insn).getLocal().getIndex());
+        } else if (insn instanceof WasmBlock) {
+            collectReads(((WasmBlock) insn).getBody(), out);
+        } else if (insn instanceof WasmConditional) {
+            collectReads(((WasmConditional) insn).getThenBlock(), out);
+            collectReads(((WasmConditional) insn).getElseBlock(), out);
+        } else if (insn instanceof WasmTry) {
+            collectReads(((WasmTry) insn).getBody(), out);
+        }
+    }
+
+    private static void collectReads(WasmInstructionList list, BitSet out) {
+        for (WasmInstruction insn = list.getFirst(); insn != null; insn = insn.getNext()) {
+            collectReads(insn, out);
+        }
+    }
+
+    /** Points local accesses (including nested code) at the piece's own copies of the locals. */
+    private static void remapLocals(WasmInstruction insn, WasmFunction part, Map<WasmLocal, WasmLocal> map) {
+        if (insn instanceof WasmGetLocal) {
+            WasmGetLocal get = (WasmGetLocal) insn;
+            get.setLocal(copy(get.getLocal(), part, map));
+        } else if (insn instanceof WasmSetLocal) {
+            WasmSetLocal set = (WasmSetLocal) insn;
+            set.setLocal(copy(set.getLocal(), part, map));
+        } else if (insn instanceof WasmTeeLocal) {
+            WasmTeeLocal tee = (WasmTeeLocal) insn;
+            tee.setLocal(copy(tee.getLocal(), part, map));
+        } else if (insn instanceof WasmBlock) {
+            remapLocals(((WasmBlock) insn).getBody(), part, map);
+        } else if (insn instanceof WasmConditional) {
+            remapLocals(((WasmConditional) insn).getThenBlock(), part, map);
+            remapLocals(((WasmConditional) insn).getElseBlock(), part, map);
+        } else if (insn instanceof WasmTry) {
+            remapLocals(((WasmTry) insn).getBody(), part, map);
+        }
+    }
+
+    private static void remapLocals(WasmInstructionList list, WasmFunction part, Map<WasmLocal, WasmLocal> map) {
+        for (WasmInstruction insn = list.getFirst(); insn != null; insn = insn.getNext()) {
+            remapLocals(insn, part, map);
+        }
+    }
+
+    private static WasmLocal copy(WasmLocal local, WasmFunction part, Map<WasmLocal, WasmLocal> map) {
+        return map.computeIfAbsent(local, l -> {
+            WasmLocal result = new WasmLocal(l.getType(), l.getName());
+            result.setJavaType(l.getJavaType());
+            part.add(result);
+            return result;
+        });
+    }
+
     /** Rejects bodies with early returns or branches whose target is the function body itself. */
     private static boolean splittable(WasmInstructionList list, WasmInstructionList functionBody) {
         for (WasmInstruction insn = list.getFirst(); insn != null; insn = insn.getNext()) {
-            if (insn instanceof WasmReturn) {
+            if (insn instanceof WasmReturn && !(list == functionBody && insn.getNext() == null)) {
                 return false;
             }
             if (insn instanceof WasmBreak && ((WasmBreak) insn).getTarget() == functionBody
