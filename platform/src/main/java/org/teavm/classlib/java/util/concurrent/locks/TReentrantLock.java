@@ -22,7 +22,7 @@ public class TReentrantLock implements TLock, java.io.Serializable {
             boolean interrupted = false;
             while (owner != null && owner != me) {
                 try {
-                    wait();
+                    teafabric.web.debug.WaitTracker.waitOn(this, "ReentrantLock");
                 } catch (InterruptedException e) {
                     interrupted = true;
                 }
@@ -40,7 +40,7 @@ public class TReentrantLock implements TLock, java.io.Serializable {
         Thread me = Thread.currentThread();
         synchronized (this) {
             while (owner != null && owner != me) {
-                wait();
+                teafabric.web.debug.WaitTracker.waitOn(this, "ReentrantLock");
             }
             owner = me;
             holds++;
@@ -104,7 +104,7 @@ public class TReentrantLock implements TLock, java.io.Serializable {
         boolean interrupted = false;
         while (owner != null && owner != me) {
             try {
-                wait();
+                teafabric.web.debug.WaitTracker.waitOn(this, "ReentrantLock");
             } catch (InterruptedException e) {
                 interrupted = true;
             }
@@ -175,7 +175,7 @@ public class TReentrantLock implements TLock, java.io.Serializable {
                             }
                             wait(left);
                         } else if (millis == 0) {
-                            wait();
+                            teafabric.web.debug.WaitTracker.waitOn(this, "ReentrantLock");
                         } else {
                             break;
                         }

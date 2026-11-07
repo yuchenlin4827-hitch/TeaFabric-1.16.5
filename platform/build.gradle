@@ -6,7 +6,6 @@ plugins {
 // It replaces native/desktop-only pieces of Minecraft's runtime with browser implementations.
 java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
 tasks.withType(JavaCompile).configureEach {
-    options.release = 21
     options.compilerArgs += ['-Xlint:-options']
 }
 
@@ -42,6 +41,21 @@ sourceSets {
     legacy {
         java.srcDirs = ['src/legacy/java']
     }
+    // JDK-named declarations of class-library bridges; compile-only, never given to TeaVM.
+    jdkapi {
+        java.srcDirs = ['src/jdkapi/java']
+    }
+}
+tasks.named('compileJdkapiJava') {
+    options.release = 8
+    options.compilerArgs += ['-Xlint:-options']
+}
+// java.nio is a java.base package: make the JDK-named declarations visible by patching the module
+// (incompatible with --release, which is why the main source set compiles without it on JDK 21).
+tasks.named('compileJava') {
+    dependsOn 'compileJdkapiJava'
+    options.release = null
+    options.compilerArgs += ['--patch-module', "java.base=${sourceSets.jdkapi.output.classesDirs.asPath}"]
 }
 tasks.named('compileLegacyJava') {
     options.release = 8

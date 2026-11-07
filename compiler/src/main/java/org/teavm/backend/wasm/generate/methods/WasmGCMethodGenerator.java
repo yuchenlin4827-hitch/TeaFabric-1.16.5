@@ -336,7 +336,7 @@ public class WasmGCMethodGenerator implements BaseWasmFunctionRepository {
         // (anyref). Their constructors can become reachable through reflection metadata, but their
         // bodies would pass an anyref "this" to Object.<init>, producing an invalid module.
         if (!method.hasModifier(ElementModifier.STATIC)
-                && method.getOwnerName().startsWith("org.teavm.runtime.Fiber$Platform")) {
+                && isJsValueMarker(method.getOwnerName())) {
             function.getBody().add(new org.teavm.backend.wasm.model.instruction.WasmUnreachable());
             return;
         }
@@ -635,5 +635,12 @@ public class WasmGCMethodGenerator implements BaseWasmFunctionRepository {
             module.functions.add(dummyInitializer);
         }
         return dummyInitializer;
+    }
+
+    /** TeaFabric patch helper: Fiber's JS-value marker classes (not their *Wrapper holders). */
+    private static boolean isJsValueMarker(String className) {
+        return className.equals("org.teavm.runtime.Fiber$PlatformObject")
+                || className.equals("org.teavm.runtime.Fiber$PlatformFunction")
+                || className.equals("org.teavm.runtime.Fiber$PlatformException");
     }
 }

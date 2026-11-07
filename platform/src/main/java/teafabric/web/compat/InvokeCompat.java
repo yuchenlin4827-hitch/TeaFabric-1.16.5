@@ -1,20 +1,56 @@
 package teafabric.web.compat;
 
 import java.lang.invoke.MethodHandle;
-import org.teavm.classlib.java.lang.invoke.TMethodHandles$Lookup;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 
-/** Redirect targets for java.lang.invoke (no run-time method handles in AOT-compiled Wasm). */
+/**
+ * Redirect targets for java.lang.invoke. Method handles cannot be created at run time in an
+ * ahead-of-time compiled program: lookups behave as if the member did not exist, which is how
+ * Minecraft's optional-feature probes (e.g. GLFW raw mouse motion in InputUtil) expect to fail.
+ */
 public final class InvokeCompat {
     private InvokeCompat() {
     }
 
-    // The JDK Lookup type maps to TMethodHandles$Lookup when TeaVM compiles this class.
-    public static java.lang.invoke.MethodHandles.Lookup lookup() {
-        return (java.lang.invoke.MethodHandles.Lookup) (Object) TMethodHandles$Lookup.INSTANCE;
+    public static MethodHandles.Lookup lookup() {
+        return null;
     }
 
-    public static java.lang.invoke.MethodHandles.Lookup publicLookup() {
-        return lookup();
+    public static MethodHandles.Lookup publicLookup() {
+        return null;
+    }
+
+    public static MethodType methodType(Class<?> rtype) {
+        return null;
+    }
+
+    public static MethodType methodType(Class<?> rtype, Class<?> ptype0) {
+        return null;
+    }
+
+    public static MethodType methodType(Class<?> rtype, Class<?>[] ptypes) {
+        return null;
+    }
+
+    public static MethodHandle findStatic(MethodHandles.Lookup lookup, Class<?> refc, String name, MethodType type)
+            throws NoSuchMethodException {
+        throw new NoSuchMethodException(refc.getName() + "." + name);
+    }
+
+    public static MethodHandle findVirtual(MethodHandles.Lookup lookup, Class<?> refc, String name,
+            MethodType type) throws NoSuchMethodException {
+        throw new NoSuchMethodException(refc.getName() + "." + name);
+    }
+
+    public static MethodHandle findStaticGetter(MethodHandles.Lookup lookup, Class<?> refc, String name,
+            Class<?> type) throws NoSuchFieldException {
+        throw new NoSuchFieldException(refc.getName() + "." + name);
+    }
+
+    public static MethodHandle findGetter(MethodHandles.Lookup lookup, Class<?> refc, String name, Class<?> type)
+            throws NoSuchFieldException {
+        throw new NoSuchFieldException(refc.getName() + "." + name);
     }
 
     public static boolean invokeExact(MethodHandle h) {

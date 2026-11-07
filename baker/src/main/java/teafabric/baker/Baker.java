@@ -203,7 +203,9 @@ public final class Baker implements PreLaunchEntrypoint {
                 // Mixin bodies are merged into their targets. Only interface mixins (accessors / invokers,
                 // which are referenced through casts) survive as real classes.
                 if ((new ClassReader(raw).getAccess() & Opcodes.ACC_INTERFACE) != 0) {
-                    classes.put(internal, raw);
+                    // Accessor/invoker interfaces: Mixin implements their *static* members by
+                    // transforming the interface itself, so it must go through the transformer too.
+                    classes.put(internal, transformAccessor(internal, raw));
                 } else {
                     skippedMixins++;
                 }
@@ -211,6 +213,20 @@ public final class Baker implements PreLaunchEntrypoint {
             }
             classes.put(internal, transform(launcher, modId, internal, raw));
         }
+    }
+
+    private byte[] transformAccessor(String internal, byte[] raw) {
+        String name = internal.replace('/', '.');
+        try {
+            byte[] out = mixinTransformer().transformClassBytes(name, name, raw);
+            if (out != null) {
+                transformed++;
+                return out;
+            }
+        } catch (Throwable t) {
+            System.err.println("[baker] Accessor transform failed for " + internal + ": " + t);
+        }
+        return raw;
     }
 
     private byte[] transform(FabricLauncher launcher, String modId, String internal, byte[] raw) {

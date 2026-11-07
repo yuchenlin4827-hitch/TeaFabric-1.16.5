@@ -17,7 +17,12 @@
     archives: {},
     clipboard: '',
     config: {
-      username: params.get('username') || localStorage.getItem('teafabric.username') || 'Player'
+      username: params.get('username') || localStorage.getItem('teafabric.username') || 'Player',
+      probe: params.has('probe') ? '1' : null,
+      threads: params.has('threads') ? '1' : null,
+      trace: params.has('trace') ? '1' : null,
+      vanillaMain: params.has('vanillaMain') ? '1' : null,
+      waits: params.has('waits') ? '1' : null
     }
   };
 
@@ -35,6 +40,14 @@
   // Errors from Java logging (LogSink) are mirrored to an on-page console.
   tf.teafabricLog = null;
   window.teafabricLog = function (severity, text) {
+    if (params.has('beacon')) {
+      // Debugging aid: synchronous request per line, recorded in the server log even if the tab dies.
+      try {
+        const x = new XMLHttpRequest();
+        x.open('GET', '/_log?' + encodeURIComponent(text.split('\n')[0].slice(0, 300)), false);
+        x.send();
+      } catch (e) { /* ignore */ }
+    }
     if (severity >= 3 || params.has('log')) {
       logEl.hidden = false;
       logEl.textContent += text + '\n';
@@ -44,7 +57,20 @@
 
   // ------------------------------------------------------------------ WebGL / canvas
 
+  function stubGL() { // debugging aid (?nogl): a WebGL 2 context that does nothing
+    return new Proxy({}, { get: function (t, name) {
+      if (name === 'getParameter') return function (p) { return p === 3379 ? 8192 : 0; };
+      if (name === 'getShaderParameter' || name === 'getProgramParameter') return function () { return true; };
+      if (name === 'getShaderInfoLog' || name === 'getProgramInfoLog') return function () { return ''; };
+      if (name === 'checkFramebufferStatus') return function () { return 36053; };
+      if (name === 'getAttribLocation') return function () { return 0; };
+      if (String(name).indexOf('create') === 0 || name === 'getUniformLocation') return function () { return {}; };
+      return function () { return undefined; };
+    } });
+  }
+
   tf.createGL = function () {
+    if (params.has('nogl')) { overlay.classList.add('hidden'); return stubGL(); }
     const gl = canvas.getContext('webgl2', {
       alpha: false, depth: true, stencil: true, antialias: false,
       premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance'
@@ -210,6 +236,32 @@
     return out.buffer;
   }
 
+  // Optionally compile without the native "js-string" builtins (TeaVM then uses JS fallbacks).
+  function disableStringBuiltins() {
+    const strip = function (opts) {
+      if (!opts || !opts.builtins) return opts;
+      const copy = Object.assign({}, opts);
+      delete copy.builtins;
+      return copy;
+    };
+    const compile = WebAssembly.compile, compileStreaming = WebAssembly.compileStreaming;
+    const validate = WebAssembly.validate;
+    WebAssembly.compile = function (src, opts) { return compile.call(WebAssembly, src, strip(opts)); };
+    WebAssembly.compileStreaming = function (src, opts) { return compileStreaming.call(WebAssembly, src, strip(opts)); };
+    WebAssembly.validate = function (src, opts) { return validate.call(WebAssembly, src, strip(opts)); };
+  }
+  // Java stack traces are taken from Error.stack; V8 keeps only 10 frames by default.
+  Error.stackTraceLimit = 64;
+  if (params.has('nobuiltins')) disableStringBuiltins();
+  if (params.has('noaudio')) { window.AudioContext = undefined; window.webkitAudioContext = undefined; }
+  // Engine A/B switches: ?nofinalize stops GC callbacks re-entering Wasm, ?noweak makes weak references strong.
+  if (params.has('nofinalize')) {
+    window.FinalizationRegistry = function () { this.register = function () {}; this.unregister = function () {}; };
+  }
+  if (params.has('noweak')) {
+    window.WeakRef = function (v) { this.deref = function () { return v; }; };
+  }
+
   async function start() {
     if (typeof WebAssembly !== 'object' || !TeaVM || !TeaVM.wasmGC) {
       fail('This browser does not support WebAssembly.');
@@ -220,7 +272,7 @@
       tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.15, 0.35);
       setStatus('Compiling WebAssembly…', 0.55);
       const teavm = await TeaVM.wasmGC.load('teavm/classes.wasm', {
-        stackDeobfuscator: { enabled: params.has('debug') }
+        stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' }
       });
       setStatus('Starting Minecraft…', 0.7);
       teavm.exports.main([]);

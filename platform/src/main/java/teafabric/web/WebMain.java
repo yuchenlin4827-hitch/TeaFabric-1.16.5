@@ -32,9 +32,18 @@ public final class WebMain {
 
     public static void main(String[] args) {
         try {
+            if (Boot.probe()) {
+                LogSink.log(1, "INFO", "TeaFabric", "early sleep ...", null);
+                Thread.sleep(1);
+                LogSink.log(1, "INFO", "TeaFabric", "early sleep done", null);
+            }
             Boot.mountFileSystem();
             LogSink.log(1, "INFO", "TeaFabric", "Starting Minecraft 1.16.5 (Fabric, TeaVM Wasm GC)", null);
-            net.minecraft.client.main.Main.main(Boot.gameArguments());
+            if (Boot.config("vanillaMain") != null) {
+                net.minecraft.client.main.Main.main(Boot.gameArguments());
+            } else {
+                WebLauncher.launch(Boot.username(), WebWindow.width(), WebWindow.height());
+            }
         } catch (ExitError e) {
             LogSink.log(1, "INFO", "TeaFabric", "Game exited with status " + e.status, null);
         } catch (Throwable t) {

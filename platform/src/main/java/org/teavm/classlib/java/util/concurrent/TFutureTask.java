@@ -141,7 +141,7 @@ public class TFutureTask<V> implements TRunnableFuture<V> {
     @Override
     public synchronized V get() throws InterruptedException, ExecutionException {
         while (state <= RUNNING) {
-            wait();
+            teafabric.web.debug.WaitTracker.waitOn(this, "FutureTask.get");
         }
         return report();
     }

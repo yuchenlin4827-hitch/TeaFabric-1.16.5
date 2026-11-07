@@ -20,7 +20,7 @@ public class TSemaphore implements java.io.Serializable {
 
     public synchronized void acquire(int n) throws InterruptedException {
         while (permits < n) {
-            wait();
+            teafabric.web.debug.WaitTracker.waitOn(this, "Semaphore.acquire");
         }
         permits -= n;
     }
@@ -33,7 +33,7 @@ public class TSemaphore implements java.io.Serializable {
         boolean interrupted = false;
         while (permits < n) {
             try {
-                wait();
+                teafabric.web.debug.WaitTracker.waitOn(this, "Semaphore.acquire");
             } catch (InterruptedException e) {
                 interrupted = true;
             }

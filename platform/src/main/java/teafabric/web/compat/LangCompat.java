@@ -27,6 +27,10 @@ public final class LangCompat {
         throw teafabric.web.WebMain.requestExit(status);
     }
 
+    public static void exit(Runtime runtime, int status) {
+        throw teafabric.web.WebMain.requestExit(status);
+    }
+
     /** The deprecated String(byte[] ascii, int hibyte, int offset, int count) constructor. */
     @SuppressWarnings("unused")
     public static String constructString(byte[] ascii, int hibyte, int offset, int count) {
@@ -36,6 +40,15 @@ public final class LangCompat {
             chars[i] = (char) (hi | (ascii[offset + i] & 0xff));
         }
         return new String(chars);
+    }
+
+    /** Thread.sleep with delays beyond what browser timers support (2^31-1 ms) is done in slices. */
+    public static void sleep(long millis) throws InterruptedException {
+        while (millis > Integer.MAX_VALUE / 2) {
+            Thread.sleep(Integer.MAX_VALUE / 2);
+            millis -= Integer.MAX_VALUE / 2;
+        }
+        Thread.sleep(millis);
     }
 
     // ---- Class

@@ -11,6 +11,7 @@ dependencies {
     implementation 'org.ow2.asm:asm:9.8'
     implementation 'org.ow2.asm:asm-tree:9.8'
     implementation 'org.ow2.asm:asm-commons:9.8'
+    implementation 'org.ow2.asm:asm-analysis:9.8'
     implementation 'net.fabricmc:tiny-remapper:0.15.0'
     implementation 'net.fabricmc:mapping-io:0.9.2'
 }

@@ -44,7 +44,13 @@ public class RedirectTransformer implements ClassHolderTransformer {
     private final List<String> excluded = new ArrayList<>();
 
     public RedirectTransformer(ClassLoader classLoader) {
+        // TeaVM presents its class library under the java.* names; its natives are intrinsics and must
+        // never be touched, and its internals never call the APIs we redirect.
         excluded.add("org.teavm.");
+        excluded.add("java.");
+        excluded.add("javax.");
+        excluded.add("jdk.");
+        excluded.add("sun.");
         excluded.add("teafabric.web.compat.");
         try {
             for (URL url : Collections.list(classLoader.getResources("META-INF/teafabric/redirects.txt"))) {
@@ -74,7 +80,8 @@ public class RedirectTransformer implements ClassHolderTransformer {
         if (parts.length != 5 || !parts[3].equals("->")) {
             throw new IllegalArgumentException("Bad redirect rule: " + line);
         }
-        rules.put(new MethodReference(parts[0], MethodDescriptor.parse(parts[1] + parts[2])), parts[4]);
+        // first rule wins: hand-written rules (platform) come before generated stub rules on the class path
+        rules.putIfAbsent(new MethodReference(parts[0], MethodDescriptor.parse(parts[1] + parts[2])), parts[4]);
     }
 
     @Override

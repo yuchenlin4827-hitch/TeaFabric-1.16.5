@@ -18,3 +18,17 @@ dependencies {
     compileOnly "org.teavm:teavm-core:${teavmVersion}"
     compileOnly "org.teavm:teavm-relocated-libs-hppc:${teavmVersion}"
 }
+
+// Patched TeaVM *runtime* classes: these are compiled into the program, so they are put first on
+// the TeaVM program class path (the TeaVM tool reads program classes from that list, not from its
+// own class loader).
+sourceSets {
+    runtime {
+        java.srcDirs = ['src/runtime/java']
+        compileClasspath += sourceSets.main.compileClasspath
+    }
+}
+tasks.named('compileRuntimeJava') {
+    options.release = 17
+}
+tasks.named('classes') { dependsOn 'runtimeClasses' }

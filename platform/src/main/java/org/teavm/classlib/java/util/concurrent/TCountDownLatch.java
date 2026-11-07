@@ -14,7 +14,7 @@ public class TCountDownLatch {
 
     public synchronized void await() throws InterruptedException {
         while (count > 0) {
-            wait();
+            teafabric.web.debug.WaitTracker.waitOn(this, "CountDownLatch.await");
         }
     }
 

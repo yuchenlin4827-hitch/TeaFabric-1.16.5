@@ -128,7 +128,7 @@ public class TCompletableFuture<T> implements TFuture<T>, TCompletionStage<T> {
 
     private synchronized void waitDone() throws InterruptedException {
         while (!done) {
-            wait();
+            teafabric.web.debug.WaitTracker.waitOn(this, "CompletableFuture");
         }
     }
 

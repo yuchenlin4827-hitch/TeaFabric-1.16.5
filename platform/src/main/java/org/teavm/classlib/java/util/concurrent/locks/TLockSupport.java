@@ -58,7 +58,7 @@ public final class TLockSupport {
                     if (millis > 0) {
                         MONITOR.wait(millis);
                     } else {
-                        MONITOR.wait();
+                        teafabric.web.debug.WaitTracker.waitOn(MONITOR, "LockSupport.park");
                     }
                 } catch (InterruptedException e) {
                     me.interrupt();
