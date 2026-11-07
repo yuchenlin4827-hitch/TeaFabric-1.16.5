@@ -252,6 +252,8 @@
   }
   // Java stack traces are taken from Error.stack; V8 keeps only 10 frames by default.
   Error.stackTraceLimit = 64;
+  // ?waits: the patched TObject records threads blocked on monitors / Object.wait in __tfBlocked.
+  globalThis.__tfDebugWaits = params.has('waits');
   if (params.has('nobuiltins')) disableStringBuiltins();
   if (params.has('noaudio')) { window.AudioContext = undefined; window.webkitAudioContext = undefined; }
   // Engine A/B switches: ?nofinalize stops GC callbacks re-entering Wasm, ?noweak makes weak references strong.

@@ -102,7 +102,18 @@ public class TObject {
             o.monitor.owner = TThread.currentThread();
         }
         if (o.monitor.owner != TThread.currentThread()) {
+            // TeaFabric patch: record blocked threads for the ?waits deadlock tracer.
+            int debugId = 0;
+            if (debugEnabled()) {
+                TThread owner = o.monitor.owner;
+                debugId = ++debugSeq;
+                debugBlock(debugId, "monitor enter by '" + TThread.currentThread().getName() + "', owner '"
+                        + (owner != null ? owner.getName() : "?") + "'");
+            }
             monitorEnterWait(o, count);
+            if (debugId != 0) {
+                debugUnblock(debugId);
+            }
         } else {
             o.monitor.count += count;
         }
@@ -462,8 +473,32 @@ public class TObject {
         if (!holdsLock(this)) {
             throw new TIllegalMonitorStateException();
         }
-        waitImpl(timeout, nanos);
+        // TeaFabric patch: record blocked threads for the ?waits deadlock tracer.
+        int debugId = 0;
+        if (debugEnabled()) {
+            debugId = ++debugSeq;
+            debugBlock(debugId, "Object.wait(" + timeout + ") by '" + TThread.currentThread().getName() + "'");
+        }
+        try {
+            waitImpl(timeout, nanos);
+        } finally {
+            if (debugId != 0) {
+                debugUnblock(debugId);
+            }
+        }
     }
+
+    private static int debugSeq;
+
+    @org.teavm.jso.JSBody(script = "return !!globalThis.__tfDebugWaits;")
+    private static native boolean debugEnabled();
+
+    @org.teavm.jso.JSBody(params = { "id", "what" }, script = "(globalThis.__tfBlocked || (globalThis.__tfBlocked = {}))[id]"
+            + " = { what: what, since: Date.now(), stack: new Error().stack };")
+    private static native void debugBlock(int id, String what);
+
+    @org.teavm.jso.JSBody(params = "id", script = "if (globalThis.__tfBlocked) delete globalThis.__tfBlocked[id];")
+    private static native void debugUnblock(int id);
 
     @Async
     private native void waitImpl(long timeout, int nanos) throws TInterruptedException;
