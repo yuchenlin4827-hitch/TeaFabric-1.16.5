@@ -280,7 +280,14 @@
           imports.teafabricDebug = {
             enabled: function () { return params.has('waits'); },
             block: function (id, kind) { blocked[id] = { what: kinds[kind], since: Date.now(), stack: new Error().stack }; },
-            unblock: function (id) { delete blocked[id]; }
+            unblock: function (id) { delete blocked[id]; },
+            suspend: function (state) {
+              if (!params.has('waits')) return;
+              const log = globalThis.__tfSuspends || (globalThis.__tfSuspends = { count: {}, last: [] });
+              log.count[state] = (log.count[state] || 0) + 1;
+              log.last.push({ state: state, at: Date.now(), stack: new Error().stack });
+              if (log.last.length > 12) log.last.shift();
+            }
           };
         }
       });

@@ -130,8 +130,14 @@ public class GLFW {
         if (swaps++ == 0) {
             teafabric.web.log.LogSink.log(1, "INFO", "TeaFabric", "First frame presented", null);
         }
+        swapMarker(0);
         WebWindow.waitForFrame();
+        swapMarker(1);
     }
+
+    @org.teavm.jso.JSBody(params = "after", script = "if (after) teafabric.swapsAfter = (teafabric.swapsAfter || 0) + 1;"
+            + " else teafabric.swapsBefore = (teafabric.swapsBefore || 0) + 1;")
+    private static native void swapMarker(int after);
 
     public static boolean glfwWindowShouldClose(long window) {
         return shouldClose;

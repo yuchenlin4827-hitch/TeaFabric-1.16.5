@@ -282,8 +282,13 @@ public final class Fiber {
         return v != null ? (Double) v : 0;
     }
 
+    // TeaFabric patch: reports suspension attempts to boot.js (?waits) to debug lost suspensions.
+    @org.teavm.interop.Import(module = "teafabricDebug", name = "suspend")
+    private static native void debugSuspend(int state);
+
     public static Object suspend(AsyncCall call) throws Throwable {
         Fiber fiber = current();
+        debugSuspend(fiber == null ? -1 : fiber.state);
         if (fiber == null) {
             throw new IllegalStateException("Suspension point reached from non-threading context "
                     + "(perhaps, from native JS method). See https://teavm.org/docs/runtime/coroutines.html "
