@@ -24,6 +24,7 @@ import org.teavm.interop.Address;
 import org.teavm.interop.Async;
 import org.teavm.interop.AsyncCallback;
 import org.teavm.interop.DelegateTo;
+import org.teavm.interop.Import;
 import org.teavm.interop.NoSideEffects;
 import org.teavm.interop.Rename;
 import org.teavm.interop.Structure;
@@ -105,10 +106,8 @@ public class TObject {
             // TeaFabric patch: record blocked threads for the ?waits deadlock tracer.
             int debugId = 0;
             if (debugEnabled()) {
-                TThread owner = o.monitor.owner;
                 debugId = ++debugSeq;
-                debugBlock(debugId, "monitor enter by '" + TThread.currentThread().getName() + "', owner '"
-                        + (owner != null ? owner.getName() : "?") + "'");
+                debugBlock(debugId, 1);
             }
             monitorEnterWait(o, count);
             if (debugId != 0) {
@@ -477,7 +476,7 @@ public class TObject {
         int debugId = 0;
         if (debugEnabled()) {
             debugId = ++debugSeq;
-            debugBlock(debugId, "Object.wait(" + timeout + ") by '" + TThread.currentThread().getName() + "'");
+            debugBlock(debugId, timeout > 0 || nanos > 0 ? 3 : 2);
         }
         try {
             waitImpl(timeout, nanos);
@@ -490,14 +489,14 @@ public class TObject {
 
     private static int debugSeq;
 
-    @org.teavm.jso.JSBody(script = "return !!globalThis.__tfDebugWaits;")
+    // Supplied by boot.js (installImports); kind: 1 = monitor enter, 2 = Object.wait(), 3 = timed wait.
+    @Import(module = "teafabricDebug", name = "enabled")
     private static native boolean debugEnabled();
 
-    @org.teavm.jso.JSBody(params = { "id", "what" }, script = "(globalThis.__tfBlocked || (globalThis.__tfBlocked = {}))[id]"
-            + " = { what: what, since: Date.now(), stack: new Error().stack };")
-    private static native void debugBlock(int id, String what);
+    @Import(module = "teafabricDebug", name = "block")
+    private static native void debugBlock(int id, int kind);
 
-    @org.teavm.jso.JSBody(params = "id", script = "if (globalThis.__tfBlocked) delete globalThis.__tfBlocked[id];")
+    @Import(module = "teafabricDebug", name = "unblock")
     private static native void debugUnblock(int id);
 
     @Async

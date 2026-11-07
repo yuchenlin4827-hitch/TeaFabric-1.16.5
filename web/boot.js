@@ -252,8 +252,6 @@
   }
   // Java stack traces are taken from Error.stack; V8 keeps only 10 frames by default.
   Error.stackTraceLimit = 64;
-  // ?waits: the patched TObject records threads blocked on monitors / Object.wait in __tfBlocked.
-  globalThis.__tfDebugWaits = params.has('waits');
   if (params.has('nobuiltins')) disableStringBuiltins();
   if (params.has('noaudio')) { window.AudioContext = undefined; window.webkitAudioContext = undefined; }
   // Engine A/B switches: ?nofinalize stops GC callbacks re-entering Wasm, ?noweak makes weak references strong.
@@ -274,7 +272,17 @@
       tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.15, 0.35);
       setStatus('Compiling WebAssembly…', 0.55);
       const teavm = await TeaVM.wasmGC.load('teavm/classes.wasm', {
-        stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' }
+        stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' },
+        installImports: function (imports) {
+          // ?waits: the patched TObject reports threads blocked on monitors / Object.wait.
+          const blocked = globalThis.__tfBlocked = {};
+          const kinds = ['', 'monitor enter', 'Object.wait()', 'Object.wait(timeout)'];
+          imports.teafabricDebug = {
+            enabled: function () { return params.has('waits'); },
+            block: function (id, kind) { blocked[id] = { what: kinds[kind], since: Date.now(), stack: new Error().stack }; },
+            unblock: function (id) { delete blocked[id]; }
+          };
+        }
       });
       setStatus('Starting Minecraft…', 0.7);
       teavm.exports.main([]);
