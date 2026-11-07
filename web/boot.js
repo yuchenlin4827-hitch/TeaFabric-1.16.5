@@ -262,6 +262,8 @@
     window.WeakRef = function (v) { this.deref = function () { return v; }; };
   }
 
+  let wasmExports = null;
+
   async function start() {
     if (typeof WebAssembly !== 'object' || !TeaVM || !TeaVM.wasmGC) {
       fail('This browser does not support WebAssembly.');
@@ -274,6 +276,12 @@
       const teavm = await TeaVM.wasmGC.load('teavm/classes.wasm', {
         stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' },
         installImports: function (imports) {
+          // Frame pacing for glfwSwapBuffers (see WebWindow.waitForFrame).
+          imports.teafabricFrame = {
+            request: function () {
+              requestAnimationFrame(function () { wasmExports.teafabricFrameReady(); });
+            }
+          };
           // ?waits: the patched TObject reports threads blocked on monitors / Object.wait.
           const blocked = globalThis.__tfBlocked = {};
           const kinds = ['', 'monitor enter', 'Object.wait()', 'Object.wait(timeout)'];
@@ -285,12 +293,15 @@
               if (!params.has('waits')) return;
               const log = globalThis.__tfSuspends || (globalThis.__tfSuspends = { count: {}, last: [] });
               log.count[state] = (log.count[state] || 0) + 1;
-              log.last.push({ state: state, at: Date.now(), stack: new Error().stack });
+              const entry = { state: state, at: Date.now(), stack: new Error().stack };
+              log.last.push(entry);
               if (log.last.length > 12) log.last.shift();
+              if (/glfwSwapBuffers|waitForFrame/.test(entry.stack)) (log.swap || (log.swap = [])).push(entry);
             }
           };
         }
       });
+      wasmExports = teavm.instance.exports;
       setStatus('Starting Minecraft…', 0.7);
       teavm.exports.main([]);
     } catch (e) {
