@@ -297,6 +297,11 @@
               log.last.push(entry);
               if (log.last.length > 12) log.last.shift();
               if (/glfwSwapBuffers|waitForFrame/.test(entry.stack)) (log.swap || (log.swap = [])).push(entry);
+              if (!/WaitTracker/.test(entry.stack)) {
+                const other = log.other || (log.other = []);
+                other.push(entry);
+                if (other.length > 12) other.shift();
+              }
             }
           };
         }
