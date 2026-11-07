@@ -74,7 +74,7 @@ public class TReentrantReadWriteLock implements TReadWriteLock, java.io.Serializ
                 }
                 wait(left);
             } else {
-                wait();
+                teafabric.web.debug.WaitTracker.waitOn(this, "ReentrantReadWriteLock");
             }
         }
     }
@@ -122,7 +122,7 @@ public class TReentrantReadWriteLock implements TReadWriteLock, java.io.Serializ
                 }
                 wait(left);
             } else {
-                wait();
+                teafabric.web.debug.WaitTracker.waitOn(this, "ReentrantReadWriteLock");
             }
         }
     }

@@ -21,7 +21,8 @@
       probe: params.has('probe') ? '1' : null,
       threads: params.has('threads') ? '1' : null,
       trace: params.has('trace') ? '1' : null,
-      vanillaMain: params.has('vanillaMain') ? '1' : null
+      vanillaMain: params.has('vanillaMain') ? '1' : null,
+      waits: params.has('waits') ? '1' : null
     }
   };
 
@@ -249,6 +250,8 @@
     WebAssembly.compileStreaming = function (src, opts) { return compileStreaming.call(WebAssembly, src, strip(opts)); };
     WebAssembly.validate = function (src, opts) { return validate.call(WebAssembly, src, strip(opts)); };
   }
+  // Java stack traces are taken from Error.stack; V8 keeps only 10 frames by default.
+  Error.stackTraceLimit = 64;
   if (params.has('nobuiltins')) disableStringBuiltins();
   if (params.has('noaudio')) { window.AudioContext = undefined; window.webkitAudioContext = undefined; }
   // Engine A/B switches: ?nofinalize stops GC callbacks re-entering Wasm, ?noweak makes weak references strong.

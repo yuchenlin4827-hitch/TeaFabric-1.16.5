@@ -79,6 +79,13 @@ Put additional Fabric mods (release jars for 1.16.5) into `./mods/`; they are ba
 * Patched copies of four TeaVM 0.16.0 classes (marked `TeaFabric patch`): nullable block types around
   conditionals and coroutine splits (TeaVM produced invalid modules for Minecraft), JS-value marker
   constructors, and fiber stack growth without `Arrays.copyOf` (infinite recursion while unwinding).
+* Function splitting, because V8's optimising tier runs out of zone memory ("V8 process OOM (Zone)")
+  on huge Wasm functions and kills the renderer:
+  * `tools/SplitClinits` (task `splitClinits`) cuts huge static initialisers such as `Blocks.<clinit>`
+    into chains of static methods on bytecode, where the operand stack is empty, no jump/try range
+    crosses and no local is live;
+  * `teafabric.compiler.wasm.FunctionSplitter` (hooked into a patched `WasmGCTarget`) does the same on
+    the Wasm level for TeaVM's generated `teavm@initializer` / `teavm@initReflection` (4 MB and 3 MB).
 * `tools/AutoStub` turns TeaVM's missing-symbol report into bytecode stubs that throw
   `UnsupportedOperationException("… is not available in the browser")`, mirroring the real JDK
   hierarchy (so `catch (IOException)` still works). Stubs are lowest priority on the class path.
@@ -93,6 +100,7 @@ gradle :tools:setupMinecraft          # download Minecraft 1.16.5 + latest Fabri
 gradle :tools:remapIntermediary       # intermediary client (compile classpath for web mods)
 gradle bake -PwithFabricApi=true      # Fabric Loader + Fabric API, mixins applied at build time
 gradle :platform:classes stubWeb compileWeb   # repeat stubWeb/compileWeb until no missing symbols
+                                              # (compileWeb runs generateTables and splitClinits)
 gradle packageWeb
 python3 -m http.server -d build/web 8080      # open http://localhost:8080/
 ```
@@ -105,7 +113,8 @@ Useful properties: `-PteavmFast=true` (fast dependency analysis), `-PteavmOpt=SI
 Page switches (debugging): `?log` (log overlay), `?username=Name`, `?threads` (Minecraft worker pools
 on green threads instead of inline), `?trace` (GL upload/draw trace), `?beacon` (log lines are sent to
 the HTTP server, survives renderer crashes), `?nogl`, `?noaudio`, `?nobuiltins`, `?nodeobf`,
-`?nofinalize` / `?noweak` (no GC callbacks into Wasm / strong weak references),
+`?nofinalize` / `?noweak` (no GC callbacks into Wasm / strong weak references), `?waits` (print the
+Java stack of any lock/future/park wait blocked for more than 5 s: finds green-thread deadlocks),
 `?vanillaMain` (start through `net.minecraft.client.main.Main`).
 
 ## Status
@@ -115,19 +124,21 @@ Working:
 * Download pipeline (SHA-1 verified), latest Fabric Loader (0.20.1) and Fabric API (0.42.0+1.16).
 * Build-time Mixin application for all 50 mods; Fabric API client entrypoints run in the browser.
 * TeaVM 0.16 compiles Minecraft + Fabric (≈20,000 classes, ≈120,000 methods) into a valid Wasm GC module.
-* In Chromium: `Bootstrap` (all registries) in ≈2.5 s, `MinecraftClient` construction, WebGL 2
-  context, and the **Mojang loading screen rendered through the fixed-function shader JIT**.
-* In Node.js (V8 12.4, stub WebGL): the complete resource reload, including all texture atlases and
-  model baking.
+* In Chromium 153 and Chrome 157: `Bootstrap` (all registries) in ≈2.5 s, `MinecraftClient`
+  construction with the complete resource reload (all texture atlases, models, sound engine) in ≈15 s,
+  WebGL 2 context, the **Mojang loading screen rendered through the fixed-function shader JIT**, and
+  entry into the game loop.
 
 Not working yet / known issues:
 
-* **Chromium renderer crash**: a few seconds into the resource reload the Chromium renderer
-  (headless shell and full Chromium, build 1243) dies with SIGSEGV inside V8. It is not caused by
-  Wasm traps, WebGL, WebAudio, `js-string` builtins, lazy compilation, inlining or GC threading (each
-  ruled out with flags / stubs), and the same module runs in Node's V8. Strict mode is enabled
-  because null dereferences relying on engine traps crash this Chromium (reproduced with a 10-line
-  TeaVM program).
+* **Title screen not reached yet**: after the loading screen the first title-screen frame never
+  reaches `glfwSwapBuffers`; the page is idle (a green-thread wait that is never woken). Being traced
+  with `?waits`.
+* Fixed: the earlier Chromium renderer crash was V8's optimising compiler running out of zone memory
+  (`V8 process OOM (Zone)`, Turboshaft `WasmGCOptimize` phase) when tiering up the 230 KB Wasm
+  function of `Blocks.<clinit>`; found with a gdb-attached renderer, a CDP trace and
+  `--wasm-tier-up-filter`, fixed by the function splitters above. Strict mode stays enabled because
+  null dereferences relying on engine traps crash Chromium (reproduced with a 10-line TeaVM program).
 * Sounds: Ogg Vorbis decoding is not wired up yet (`.ogg` assets are not packaged).
 * No world persistence (IndexedDB) yet; integrated server / single-player untested.
 * Multiplayer needs a WebSocket ↔ TCP proxy (browsers cannot open TCP sockets); online-mode
