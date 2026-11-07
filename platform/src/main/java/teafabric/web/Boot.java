@@ -7,7 +7,7 @@ import teafabric.web.log.LogSink;
 import teafabric.web.vfs.WebFileSystem;
 
 /** Start-up: mounts the archives boot.js downloaded and builds Minecraft's command line. */
-final class Boot {
+public final class Boot {
     private Boot() {
     }
 
@@ -22,7 +22,7 @@ final class Boot {
     private static native Int8Array takeArchive(int i);
 
     @JSBody(params = "key", script = "var v = teafabric.config[key]; return v === undefined || v === null ? null : '' + v;")
-    private static native String config(String key);
+    static native String config(String key);
 
     static void mountFileSystem() throws java.io.IOException {
         int n = archiveCount();
@@ -41,6 +41,15 @@ final class Boot {
         new File(WebFileSystem.GAME_DIR + "/resourcepacks").mkdirs();
         new File(WebFileSystem.GAME_DIR + "/saves").mkdirs();
         new File(WebFileSystem.GAME_DIR + "/config").mkdirs();
+    }
+
+    public static boolean probe() {
+        return config("probe") != null;
+    }
+
+    static String username() {
+        String user = config("username");
+        return user == null || user.isEmpty() ? "Player" : user;
     }
 
     static String[] gameArguments() {

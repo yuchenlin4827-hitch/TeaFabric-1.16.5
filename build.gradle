@@ -19,6 +19,11 @@ ext {
     }
 }
 
+repositories {
+    maven { url = 'https://maven-central.storage-download.googleapis.com/maven2/' }
+    mavenCentral()
+}
+
 subprojects {
     repositories {
         // Google's Maven Central mirror first: repo.maven.apache.org rate-limits bursts (HTTP 429).
@@ -90,6 +95,7 @@ def stubsJar = file('.cache/stubs/stubs.jar')
 def programClasspath = {
     def platform = project(':platform')
     def cp = []
+    cp += project(':compiler').sourceSets.runtime.output.files // patched TeaVM runtime classes
     cp += platform.sourceSets.main.output.files
     cp += platform.sourceSets.legacy.output.files
     cp += platform.configurations.teavmProgram.files
@@ -100,6 +106,21 @@ def programClasspath = {
                     'oshi-core']
     cp += setupJars('minecraft.libraries').findAll { jar -> !replaced.any { jar.name.startsWith(it) } }
     return cp.findAll { it.exists() }
+}
+
+def tablesJar = file('.cache/generated/tables.jar')
+
+tasks.register('generateTables', JavaExec) {
+    group = 'teafabric'
+    description = 'Whole-program reflection replacement tables (generic supertypes of TypeTokens).'
+    dependsOn ':tools:classes', ':platform:classes'
+    classpath = project(':tools').sourceSets.main.runtimeClasspath
+    mainClass = 'teafabric.tools.GenerateTables'
+    outputs.file(tablesJar)
+    doFirst {
+        args "--out=${tablesJar}",
+             "--classpath=${programClasspath().collect { it.absolutePath }.join(File.pathSeparator)}"
+    }
 }
 
 tasks.register('stubWeb', JavaExec) {
@@ -119,12 +140,12 @@ tasks.register('stubWeb', JavaExec) {
 tasks.register('compileWeb', JavaExec) {
     group = 'teafabric'
     description = 'Compiles the baked game with TeaVM (-PteavmTarget=wasm-gc|js).'
-    dependsOn ':platform:classes', ':compiler:classes'
+    dependsOn ':platform:classes', ':compiler:classes', 'generateTables'
     classpath = project(':compiler').sourceSets.main.runtimeClasspath
     mainClass = 'teafabric.compiler.Compile'
     maxHeapSize = findProperty('teavmHeap') ?: '6g'
     doFirst {
-        def cp = programClasspath()
+        def cp = [tablesJar] + programClasspath() // generated tables shadow the baker's copies
         if (stubsJar.exists()) {
             cp += stubsJar // lowest priority: only fills gaps
         }
@@ -133,7 +154,10 @@ tasks.register('compileWeb', JavaExec) {
              "--out=${teavmOut}",
              "--opt=${findProperty('teavmOpt') ?: 'ADVANCED'}",
              "--fast=${findProperty('teavmFast') ?: 'false'}",
-             "--debug=${findProperty('teavmDebug') ?: 'false'}",
+             "--deobfuscation=${findProperty('teavmDeobfuscation') ?: 'true'}",
+             // Explicit null/bounds checks: relying on engine traps for NullPointerException
+             // crashes current Chromium renderers (reproduced with a 10-line program).
+             "--strict=${findProperty('teavmStrict') ?: 'true'}",
              "--obfuscated=${findProperty('teavmObfuscated') ?: 'true'}",
              "--min-heap=${findProperty('teavmMinHeap') ?: '64'}",
              "--max-heap=${findProperty('teavmMaxHeap') ?: '1024'}",
@@ -194,8 +218,14 @@ tasks.register('packageWeb', Copy) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from('web')
     from(teavmOut) {
-        include 'classes.wasm'
+        include 'classes.wasm', 'classes.wasm.teadbg'
         into 'teavm'
+    }
+    from({ zipTree(configurations.detachedConfiguration(dependencies.create(
+            "org.teavm:teavm-wasm-gc-deobfuscator:${rootProject.property("teavm_version")}")).singleFile) }) {
+        include 'org/teavm/backend/wasm/deobfuscator.wasm'
+        eachFile { it.path = 'teavm/classes.wasm-deobfuscator.wasm' }
+        includeEmptyDirs = false
     }
     from({ zipTree(project(':compiler').configurations.runtimeClasspath.files.find { it.name.startsWith('teavm-core') }) }) {
         include 'org/teavm/backend/wasm/wasm-gc-runtime.js'

@@ -17,7 +17,8 @@
     archives: {},
     clipboard: '',
     config: {
-      username: params.get('username') || localStorage.getItem('teafabric.username') || 'Player'
+      username: params.get('username') || localStorage.getItem('teafabric.username') || 'Player',
+      probe: params.has('probe') ? '1' : null
     }
   };
 
@@ -220,7 +221,7 @@
       tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.15, 0.35);
       setStatus('Compiling WebAssembly…', 0.55);
       const teavm = await TeaVM.wasmGC.load('teavm/classes.wasm', {
-        stackDeobfuscator: { enabled: params.has('debug') }
+        stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' }
       });
       setStatus('Starting Minecraft…', 0.7);
       teavm.exports.main([]);

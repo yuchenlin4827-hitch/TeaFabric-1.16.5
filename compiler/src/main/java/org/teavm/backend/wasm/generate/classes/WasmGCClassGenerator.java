@@ -1887,7 +1887,7 @@ public class WasmGCClassGenerator implements WasmGCClassInfoProvider, WasmGCInit
         var objCls = standardClasses.objectClass();
         var function = new WasmFunction(functionTypes.of(objCls.getType()));
         function.setName(names.topLevel(className + "@newInstance"));
-        if (className.startsWith("org.teavm.runtime.Fiber$Platform")) { // TeaFabric patch, see above
+        if (isJsValueMarker(className)) { // TeaFabric patch, see above
             function.getBody().add(new org.teavm.backend.wasm.model.instruction.WasmUnreachable());
             function.setReferenced(true);
             module.functions.add(function);
@@ -1917,7 +1917,7 @@ public class WasmGCClassGenerator implements WasmGCClassInfoProvider, WasmGCInit
         module.functions.add(instantiator);
 
         // TeaFabric patch: JS-value marker classes (anyref) cannot be instantiated reflectively.
-        if (className.startsWith("org.teavm.runtime.Fiber$Platform")) {
+        if (isJsValueMarker(className)) {
             instantiator.add(new WasmLocal(objectClass.getType(), "param"));
             instantiator.getBody().add(new org.teavm.backend.wasm.model.instruction.WasmUnreachable());
             return instantiator;
@@ -1942,5 +1942,12 @@ public class WasmGCClassGenerator implements WasmGCClassInfoProvider, WasmGCInit
         }
 
         return instantiator;
+    }
+
+    /** TeaFabric patch helper: Fiber's JS-value marker classes (not their *Wrapper holders). */
+    private static boolean isJsValueMarker(String className) {
+        return className.equals("org.teavm.runtime.Fiber$PlatformObject")
+                || className.equals("org.teavm.runtime.Fiber$PlatformFunction")
+                || className.equals("org.teavm.runtime.Fiber$PlatformException");
     }
 }

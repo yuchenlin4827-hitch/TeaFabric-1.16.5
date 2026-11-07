@@ -87,8 +87,15 @@ public final class Compile {
         tool.setOptimizationLevel(TeaVMOptimizationLevel.valueOf(opts.getOrDefault("opt", "ADVANCED")));
         tool.setObfuscated(Boolean.parseBoolean(opts.getOrDefault("obfuscated", "true")));
         tool.setFastDependencyAnalysis(Boolean.parseBoolean(opts.getOrDefault("fast", "false")));
-        tool.setDebugInformationGenerated(Boolean.parseBoolean(opts.getOrDefault("debug", "false")));
+        if (Boolean.parseBoolean(opts.getOrDefault("deobfuscation", "true"))) {
+            // Compact line tables for readable stack traces (loaded by the page's stack deobfuscator).
+            tool.setDebugInformationGenerated(true);
+            tool.setWasmDebugInfoLevel(org.teavm.backend.wasm.WasmDebugInfoLevel.DEOBFUSCATION);
+            tool.setWasmDebugInfoLocation(org.teavm.backend.wasm.WasmDebugInfoLocation.EXTERNAL);
+        }
         tool.setIncremental(false);
+        // Strict mode: explicit null / bounds / cast checks raising Java exceptions.
+        tool.setStrict(Boolean.parseBoolean(opts.getOrDefault("strict", "false")));
         if (opts.containsKey("min-heap")) {
             tool.setMinHeapSize(Integer.parseInt(opts.get("min-heap")) * 1024 * 1024);
         }
