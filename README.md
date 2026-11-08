@@ -7,9 +7,8 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 > Fabric Loader（目前 0.20.1）與 1.16 最新的 Fabric API（0.42.0+1.16，45 個模組），以「真正的」Fabric Loader
 > 在建置期套用所有 Mixin，再用 TeaVM 編譯成單一 Wasm GC 模組，並以 WebGL 2 / WebAudio / DOM 取代 LWJGL。
 > 「JIT」指的是固定管線 OpenGL 的著色器即時特化：遊戲每使用一種新的 GL 狀態組合，就即時產生並編譯一支專用的
-> GLSL ES 3.00 程式並快取。目前狀態：在瀏覽器中可完成 `MinecraftClient` 建構並渲染 Mojang 載入畫面；
-> 在 Node.js 中可完成整個資源重新載入（所有材質圖集）。在測試用的 Chromium 版本中，資源載入數秒後渲染程序會在
-> V8 內部崩潰（同一模組在 Node 的 V8 中正常），尚在調查中。詳見下方「Status」。
+> GLSL ES 3.00 程式並快取。目前狀態：在 Chromium 153 / Chrome 157 中可完整啟動到 **Minecraft 標題畫面**
+> （全景背景、Logo、閃爍標語與按鈕，滑鼠可操作）。單人遊戲、存檔與音效尚未完成。詳見下方「Status」。
 
 ## Legal
 
@@ -126,14 +125,20 @@ Working:
 * TeaVM 0.16 compiles Minecraft + Fabric (≈20,000 classes, ≈120,000 methods) into a valid Wasm GC module.
 * In Chromium 153 and Chrome 157: `Bootstrap` (all registries) in ≈2.5 s, `MinecraftClient`
   construction with the complete resource reload (all texture atlases, models, sound engine) in ≈15 s,
-  WebGL 2 context, the **Mojang loading screen rendered through the fixed-function shader JIT**, and
-  entry into the game loop.
+  the Mojang loading screen, and the **title screen** (panorama, logo, splash text, buttons, mouse
+  hover) rendered through WebGL 2 and the fixed-function shader JIT, frame-paced by
+  `requestAnimationFrame`.
 
 Not working yet / known issues:
 
-* **Title screen not reached yet**: after the loading screen the first title-screen frame never
-  reaches `glfwSwapBuffers`; the page is idle (a green-thread wait that is never woken). Being traced
-  with `?waits`.
+* Not tried yet beyond the title screen: Singleplayer (integrated server), world rendering, keyboard
+  text input in screens.
+* Fixed on the way to the title screen (TeaVM 0.16.0 issues, all patched in `compiler/`):
+  `@Async` implementations were coroutine-transformed when anything they call may suspend
+  (`AsyncMethodFinder`; `Object.wait` never released its monitor, `requestAnimationFrame` was never
+  called), contended monitors dropped all but one queued thread (`TObject.waitForOtherThreads`),
+  interrupted waits resumed without the monitor, and `assert` statements were enabled
+  (`desiredAssertionStatus`); ICU4J's property data is now packaged for Minecraft's Bidi text code.
 * Fixed: the earlier Chromium renderer crash was V8's optimising compiler running out of zone memory
   (`V8 process OOM (Zone)`, Turboshaft `WasmGCOptimize` phase) when tiering up the 230 KB Wasm
   function of `Blocks.<clinit>`; found with a gdb-attached renderer, a CDP trace and

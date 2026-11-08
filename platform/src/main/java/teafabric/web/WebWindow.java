@@ -1,10 +1,10 @@
 package teafabric.web;
 
 import org.teavm.interop.Async;
+import org.teavm.interop.Export;
+import org.teavm.interop.Import;
 import org.teavm.interop.AsyncCallback;
 import org.teavm.jso.JSBody;
-import org.teavm.jso.JSFunctor;
-import org.teavm.jso.JSObject;
 import org.teavm.jso.webgl.WebGL2RenderingContext;
 
 /**
@@ -72,30 +72,60 @@ public final class WebWindow {
     @JSBody(script = "return performance.now();")
     public static native double now();
 
-    @JSFunctor
-    interface Callback extends JSObject {
-        void run();
-    }
 
-    @JSBody(params = "f", script = "requestAnimationFrame(function() { f(); });")
-    private static native void requestAnimationFrame(Callback f);
-
-    @JSBody(params = {"f", "ms"}, script = "setTimeout(function() { f(); }, ms);")
-    private static native void setTimeout(Callback f, int ms);
-
-    /** Suspends the calling green thread until the browser is ready for the next frame. */
+    /**
+     * Suspends the calling green thread until the browser is ready for the next frame.
+     *
+     * <p>The async implementation must not contain any call TeaVM may consider suspendable:
+     * {@code Fiber.suspend} marks the fiber as suspending before running it, so a coroutine-transformed
+     * implementation returns early at its first such call. The previous version marshalled a JSFunctor
+     * lambda ({@code JSWrapper.unwrap}, classified as suspendable in Minecraft's call graph) and therefore
+     * never reached {@code requestAnimationFrame}: the game hung on its first frame. Now the callback is
+     * kept in a field, a plain Wasm import asks boot.js for an animation frame, and boot.js answers through
+     * the exported {@link #frameReady()}, which resumes the thread (like TeaVM's own timers).
+     */
     @Async
     public static native void waitForFrame();
 
     private static void waitForFrame(AsyncCallback<Void> callback) {
-        requestAnimationFrame(() -> callback.complete(null));
+        if (frameWaiters == null) {
+            frameWaiters = new AsyncCallback[4];
+        } else if (frameWaiterCount == frameWaiters.length) {
+            AsyncCallback<?>[] grown = new AsyncCallback[frameWaiterCount * 2];
+            System.arraycopy(frameWaiters, 0, grown, 0, frameWaiterCount);
+            frameWaiters = grown;
+        }
+        frameWaiters[frameWaiterCount++] = callback;
+        if (frameWaiterCount == 1) {
+            requestFrame();
+        }
+    }
+
+    private static AsyncCallback<?>[] frameWaiters;
+    private static int frameWaiterCount;
+
+    @Import(module = "teafabricFrame", name = "request")
+    private static native void requestFrame();
+
+    /** Called by boot.js from requestAnimationFrame. */
+    @Export(name = "teafabricFrameReady")
+    @SuppressWarnings("unchecked")
+    public static void frameReady() {
+        int count = frameWaiterCount;
+        AsyncCallback<?>[] waiters = frameWaiters;
+        frameWaiters = null;
+        frameWaiterCount = 0;
+        for (int i = 0; i < count; i++) {
+            ((AsyncCallback<Void>) waiters[i]).complete(null);
+        }
     }
 
     /** Suspends the calling green thread for {@code ms} milliseconds, letting the page process events. */
-    @Async
-    public static native void yieldMillis(int ms);
-
-    private static void yieldMillis(int ms, AsyncCallback<Void> callback) {
-        setTimeout(() -> callback.complete(null), ms);
+    public static void yieldMillis(int ms) {
+        try {
+            Thread.sleep(Math.max(0, ms));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

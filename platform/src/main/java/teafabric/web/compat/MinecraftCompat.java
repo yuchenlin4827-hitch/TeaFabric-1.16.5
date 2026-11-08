@@ -65,4 +65,21 @@ public final class MinecraftCompat {
     public static DataFixer build(DataFixerBuilder builder, Executor executor) {
         return builder.build(task -> { });
     }
+
+    /**
+     * {@code new CrashException(report)}: logs the crash report right away. MinecraftClient.run() only
+     * logs a CrashException after cleanUpAfterCrash(), which can block (sound thread join), so the
+     * report would otherwise never be seen.
+     */
+    public static net.minecraft.class_148 constructclass_148(net.minecraft.class_128 report) {
+        String text;
+        try {
+            text = report.method_568(); // CrashReport.asString()
+        } catch (Throwable t) {
+            text = String.valueOf(report.method_564()); // getCause()
+        }
+        teafabric.web.log.LogSink.log(3, "ERROR", "TeaFabric", "CrashException created:\n" + text,
+                report.method_564());
+        return new net.minecraft.class_148(report);
+    }
 }

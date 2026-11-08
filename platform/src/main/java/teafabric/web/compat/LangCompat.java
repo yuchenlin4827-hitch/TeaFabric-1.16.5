@@ -143,4 +143,9 @@ public final class LangCompat {
         int second = Character.digit(s.charAt(s.length() - 1), radix);
         return first * radix + second;
     }
+
+    /** Assertions are disabled, as on a JVM without -ea (ICU4J's asserts fail on our buffers otherwise). */
+    public static boolean desiredAssertionStatus(Class<?> cls) {
+        return false;
+    }
 }

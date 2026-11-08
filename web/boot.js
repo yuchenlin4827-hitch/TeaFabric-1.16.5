@@ -48,8 +48,12 @@
         x.send();
       } catch (e) { /* ignore */ }
     }
-    if (severity >= 3 || params.has('log')) {
+    // The overlay opens by itself only for crashes; everything else is in the console (or ?log).
+    const fatal = /^\[FATAL\]|---- Minecraft Crash Report ----|Unhandled exception on the main thread/.test(text);
+    if (fatal || params.has('log')) {
       logEl.hidden = false;
+    }
+    if (severity >= 3 || params.has('log')) {
       logEl.textContent += text + '\n';
       logEl.scrollTop = logEl.scrollHeight;
     }
@@ -262,6 +266,8 @@
     window.WeakRef = function (v) { this.deref = function () { return v; }; };
   }
 
+  let wasmExports = null;
+
   async function start() {
     if (typeof WebAssembly !== 'object' || !TeaVM || !TeaVM.wasmGC) {
       fail('This browser does not support WebAssembly.');
@@ -272,8 +278,39 @@
       tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.15, 0.35);
       setStatus('Compiling WebAssembly…', 0.55);
       const teavm = await TeaVM.wasmGC.load('teavm/classes.wasm', {
-        stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' }
+        stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' },
+        installImports: function (imports) {
+          // Frame pacing for glfwSwapBuffers (see WebWindow.waitForFrame).
+          imports.teafabricFrame = {
+            request: function () {
+              requestAnimationFrame(function () { wasmExports.teafabricFrameReady(); });
+            }
+          };
+          // ?waits: the patched TObject reports threads blocked on monitors / Object.wait.
+          const blocked = globalThis.__tfBlocked = {};
+          const kinds = ['', 'monitor enter', 'Object.wait()', 'Object.wait(timeout)'];
+          imports.teafabricDebug = {
+            enabled: function () { return params.has('waits'); },
+            block: function (id, kind) { blocked[id] = { what: kinds[kind], since: Date.now(), stack: new Error().stack }; },
+            unblock: function (id) { delete blocked[id]; },
+            suspend: function (state) {
+              if (!params.has('waits')) return;
+              const log = globalThis.__tfSuspends || (globalThis.__tfSuspends = { count: {}, last: [] });
+              log.count[state] = (log.count[state] || 0) + 1;
+              const entry = { state: state, at: Date.now(), stack: new Error().stack };
+              log.last.push(entry);
+              if (log.last.length > 12) log.last.shift();
+              if (/glfwSwapBuffers|waitForFrame/.test(entry.stack)) (log.swap || (log.swap = [])).push(entry);
+              if (!/WaitTracker/.test(entry.stack)) {
+                const other = log.other || (log.other = []);
+                other.push(entry);
+                if (other.length > 12) other.shift();
+              }
+            }
+          };
+        }
       });
+      wasmExports = teavm.instance.exports;
       setStatus('Starting Minecraft…', 0.7);
       teavm.exports.main([]);
     } catch (e) {
