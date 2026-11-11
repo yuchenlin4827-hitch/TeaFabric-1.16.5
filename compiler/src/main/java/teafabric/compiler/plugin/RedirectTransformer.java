@@ -36,11 +36,14 @@ import org.teavm.model.instructions.InvokeInstruction;
  * </pre>
  *
  * An instance call {@code owner.m(args)} becomes {@code target.m(owner, args)}; a static call keeps
- * its parameter list. Constructors ({@code <init>}) are not supported. Classes whose name starts
+ * its parameter list. An owner written as {@code *owner.Class} matches the method on any receiver class
+ * (call sites of inherited/default methods name the subclass); the target still takes {@code owner.Class}. Constructors ({@code <init>}) are not supported. Classes whose name starts
  * with an excluded prefix (the redirect targets themselves, TeaVM's class library) are untouched.
  */
 public class RedirectTransformer implements ClassHolderTransformer {
     private final Map<MethodReference, String> rules = new HashMap<>();
+    /** Rules that match by name and descriptor on any owner: descriptor -> {declared owner, target}. */
+    private final Map<MethodDescriptor, String[]> anyOwnerRules = new HashMap<>();
     private final List<String> excluded = new ArrayList<>();
 
     public RedirectTransformer(ClassLoader classLoader) {
@@ -79,6 +82,11 @@ public class RedirectTransformer implements ClassHolderTransformer {
         String[] parts = line.split("\\s+");
         if (parts.length != 5 || !parts[3].equals("->")) {
             throw new IllegalArgumentException("Bad redirect rule: " + line);
+        }
+        if (parts[0].startsWith("*")) {
+            anyOwnerRules.putIfAbsent(MethodDescriptor.parse(parts[1] + parts[2]),
+                    new String[] {parts[0].substring(1), parts[4]});
+            return;
         }
         // first rule wins: hand-written rules (platform) come before generated stub rules on the class path
         rules.putIfAbsent(new MethodReference(parts[0], MethodDescriptor.parse(parts[1] + parts[2])), parts[4]);
@@ -135,7 +143,12 @@ public class RedirectTransformer implements ClassHolderTransformer {
         MethodReference ref = insn.getMethod();
         String target = rules.get(ref);
         if (target == null) {
-            return;
+            String[] any = insn.getInstance() != null ? anyOwnerRules.get(ref.getDescriptor()) : null;
+            if (any == null) {
+                return;
+            }
+            ref = new MethodReference(any[0], ref.getDescriptor());
+            target = any[1];
         }
         if (ref.getName().equals("<init>")) {
             rewriteConstructor(insn, ref, target);

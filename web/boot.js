@@ -22,7 +22,9 @@
       threads: params.has('threads') ? '1' : null,
       trace: params.has('trace') ? '1' : null,
       vanillaMain: params.has('vanillaMain') ? '1' : null,
-      waits: params.has('waits') ? '1' : null
+      waits: params.has('waits') ? '1' : null,
+      server: params.get('server'),
+      proxy: params.get('proxy')
     }
   };
 
@@ -113,33 +115,97 @@
   for (let i = 0; i < 10; i++) { KEYS['Digit' + i] = 48 + i; KEYS['Numpad' + i] = 320 + i; }
   for (let i = 1; i <= 25; i++) KEYS['F' + i] = 289 + i;
 
+  // GLFW modifier bits. Lock keys are left out (GLFW only reports them with GLFW_LOCK_KEY_MODS).
   function mods(e) {
-    return (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0)
-      | (e.getModifierState && e.getModifierState('CapsLock') ? 16 : 0)
-      | (e.getModifierState && e.getModifierState('NumLock') ? 32 : 0);
+    return (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
   }
+  // macOS: Cmd acts as Minecraft's Control (select all / copy / cut / paste shortcuts).
+  if (/Mac|iPhone|iPad/.test(navigator.platform || '')) { KEYS.MetaLeft = 341; KEYS.MetaRight = 345; }
+
+  // Text entry goes through a hidden text area instead of being guessed from key events, so that
+  // input methods (Chinese, Japanese, ...), dead keys, AltGr layouts and on-screen keyboards work:
+  // the browser composes the text, Minecraft receives it as GLFW character events.
+  const textInput = document.createElement('textarea');
+  textInput.id = 'text-input';
+  textInput.setAttribute('autocomplete', 'off');
+  textInput.setAttribute('autocorrect', 'off');
+  textInput.setAttribute('autocapitalize', 'off');
+  textInput.setAttribute('spellcheck', 'false');
+  textInput.setAttribute('aria-hidden', 'true');
+  textInput.tabIndex = -1;
+  textInput.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;padding:0;border:0;margin:0;'
+    + 'opacity:0;resize:none;overflow:hidden;font-size:16px;pointer-events:none;z-index:-1;';
+  document.body.appendChild(textInput);
+  function focusText() {
+    if (document.activeElement !== textInput) {
+      try { textInput.focus({ preventScroll: true }); } catch (e) { textInput.focus(); }
+    }
+  }
+  function pushText(text) {
+    for (const ch of text) { // iterates code points
+      const cp = ch.codePointAt(0);
+      if (cp >= 32 && cp !== 127) tf.events.push([2, cp, 0, 0, 0]);
+    }
+  }
+  let composing = false;
+  function flushText() {
+    const text = textInput.value;
+    if (text) { textInput.value = ''; pushText(text); }
+  }
+  textInput.addEventListener('compositionstart', function () { composing = true; });
+  textInput.addEventListener('compositionend', function () { composing = false; flushText(); });
+  textInput.addEventListener('input', function (e) { if (!composing && !e.isComposing) flushText(); });
+
+  const pressed = new Set();
+  function pushKey(key, action, m) {
+    if (action === 0) pressed.delete(key); else pressed.add(key);
+    tf.events.push([1, key, key, action, m]);
+  }
+  // Paste: the browser's own paste event carries the text (no clipboard permission needed); Minecraft
+  // then sees Ctrl+V and reads the clipboard string.
+  textInput.addEventListener('paste', function (e) {
+    const text = e.clipboardData && e.clipboardData.getData('text');
+    e.preventDefault();
+    if (typeof text === 'string') tf.clipboard = text;
+    const hadCtrl = pressed.has(341) || pressed.has(345);
+    if (!hadCtrl) pushKey(341, 1, 2);
+    pushKey(86, 1, 2);
+    pushKey(86, 0, 2);
+    if (!hadCtrl) pushKey(341, 0, 0);
+  });
 
   const passThrough = new Set(['F5', 'F11', 'F12']);
   window.addEventListener('keydown', function (e) {
+    if (e.isComposing || e.keyCode === 229) return; // the input method is handling this key
     const key = KEYS[e.code] !== undefined ? KEYS[e.code] : -1;
-    tf.events.push([1, key, key, e.repeat ? 2 : 1, mods(e)]);
-    if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
-      tf.events.push([2, e.key.codePointAt(0), mods(e), 0, 0]);
-    }
-    // Ctrl+V: the async clipboard read completes before Minecraft polls the clipboard string.
-    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && navigator.clipboard && navigator.clipboard.readText) {
-      navigator.clipboard.readText().then(function (t) { tf.clipboard = t; }).catch(function () {});
+    const shortcut = (e.ctrlKey || e.metaKey) && !e.altKey; // AltGr reports Ctrl+Alt and still types text
+    if (shortcut && e.code === 'KeyV') return; // handled by the paste event
+    pushKey(key, e.repeat ? 2 : 1, mods(e));
+    const types = e.key && (e.key.length === 1 || e.key === 'Dead' || e.key === 'Unidentified');
+    if (types && !shortcut) {
+      if (document.activeElement !== textInput) {
+        // Not focused yet (first key after load): this key's text would be lost, deliver it directly.
+        focusText();
+        if (e.key.length === 1) pushText(e.key);
+        e.preventDefault();
+      }
+      return; // let the browser type into the hidden text area
     }
     if (!passThrough.has(e.code)) e.preventDefault();
   });
   window.addEventListener('keyup', function (e) {
+    if (e.isComposing || e.keyCode === 229) return;
     const key = KEYS[e.code] !== undefined ? KEYS[e.code] : -1;
-    tf.events.push([1, key, key, 0, mods(e)]);
+    if (key === -1 || pressed.has(key)) pushKey(key, 0, mods(e));
     if (!passThrough.has(e.code)) e.preventDefault();
   });
-  window.addEventListener('paste', function (e) {
-    tf.clipboard = (e.clipboardData && e.clipboardData.getData('text')) || tf.clipboard;
+  // Keys held while the page loses focus never get a keyup: release them.
+  window.addEventListener('blur', function () {
+    pressed.forEach(function (key) { tf.events.push([1, key, key, 0, 0]); });
+    pressed.clear();
   });
+  window.addEventListener('focus', focusText);
+  focusText();
   tf.setClipboard = function (text) {
     tf.clipboard = text;
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(function () {});
@@ -157,7 +223,7 @@
   });
   const BUTTONS = [0, 2, 1, 3, 4]; // DOM -> GLFW (left, middle, right)
   canvas.addEventListener('mousedown', function (e) {
-    canvas.focus();
+    focusText();
     if (tf.audio && tf.audio.state === 'suspended') tf.audio.resume();
     if (tf.wantLock && !locked()) canvas.requestPointerLock();
     tf.events.push([4, BUTTONS[e.button] || e.button, 1, mods(e), 0]);
@@ -194,6 +260,44 @@
       tf.events.push([1, 256, 256, 0, 0]);
     }
   });
+
+  // ------------------------------------------------------------------ WebSockets (multiplayer)
+
+  // teafabric.web.net.WebSocketChannel: binary frames carry the raw Minecraft protocol stream.
+  const sockets = {};
+  let nextSocket = 1;
+  tf.ws = {
+    open: function (url) {
+      const id = nextSocket++;
+      const s = sockets[id] = { state: 0, queue: [], error: '', ws: null };
+      try {
+        const ws = s.ws = new WebSocket(url);
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = function () { s.state = 1; };
+        ws.onmessage = function (e) { if (typeof e.data !== 'string') s.queue.push(new Int8Array(e.data)); };
+        ws.onerror = function () { if (!s.error) s.error = s.state === 0 ? 'connection failed' : 'connection error'; };
+        ws.onclose = function (e) {
+          if (!s.error && e.code !== 1000 && e.code !== 1005) s.error = 'closed, code ' + e.code + (e.reason ? ': ' + e.reason : '');
+          s.state = 3;
+        };
+      } catch (e) {
+        s.state = 3;
+        s.error = String((e && e.message) || e);
+      }
+      return id;
+    },
+    state: function (id) { const s = sockets[id]; return s ? s.state : 3; },
+    error: function (id) { const s = sockets[id]; return s ? s.error : ''; },
+    pending: function (id) { const s = sockets[id]; return s ? s.queue.length : 0; },
+    take: function (id) { return sockets[id].queue.shift(); },
+    send: function (id, data) { const s = sockets[id]; if (s && s.ws && s.ws.readyState === 1) s.ws.send(data); },
+    close: function (id) {
+      const s = sockets[id];
+      if (!s) return;
+      delete sockets[id];
+      try { if (s.ws && s.ws.readyState < 2) s.ws.close(1000); } catch (e) { /* ignore */ }
+    }
+  };
 
   // ------------------------------------------------------------------ files, fullscreen, exit
 
@@ -301,7 +405,7 @@
               log.last.push(entry);
               if (log.last.length > 12) log.last.shift();
               if (/glfwSwapBuffers|waitForFrame/.test(entry.stack)) (log.swap || (log.swap = [])).push(entry);
-              if (!/WaitTracker/.test(entry.stack)) {
+              if (!/startWatchdog|waitForFrame/.test(entry.stack)) {
                 const other = log.other || (log.other = []);
                 other.push(entry);
                 if (other.length > 12) other.shift();

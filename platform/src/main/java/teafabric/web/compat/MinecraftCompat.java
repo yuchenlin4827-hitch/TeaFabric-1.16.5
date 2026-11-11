@@ -82,4 +82,20 @@ public final class MinecraftCompat {
                 report.method_564());
         return new net.minecraft.class_148(report);
     }
+
+    /**
+     * {@code ParentElement.setInitialFocus(element)}. Vanilla toggles the element's focus, which
+     * <em>unfocuses</em> text fields that were focused just before (Direct Connection, Add Server): the
+     * player has to click the field before typing. Here the element always ends up focused.
+     */
+    public static void method_20085(net.minecraft.class_4069 parent, net.minecraft.class_364 element) {
+        parent.method_25395(element); // setFocused
+        if (element == null) {
+            return;
+        }
+        boolean focused = element.method_25407(true); // changeFocus
+        if (!focused && element instanceof net.minecraft.class_342) {
+            ((net.minecraft.class_342) element).method_1876(true); // TextFieldWidget.setTextFieldFocused
+        }
+    }
 }

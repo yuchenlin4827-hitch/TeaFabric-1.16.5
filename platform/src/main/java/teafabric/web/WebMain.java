@@ -37,6 +37,12 @@ public final class WebMain {
                 Thread.sleep(1);
                 LogSink.log(1, "INFO", "TeaFabric", "early sleep done", null);
             }
+            // Netty: heap buffers only, no pooling/recycling/leak sampling (no Unsafe, no direct memory here).
+            System.setProperty("io.netty.allocator.type", "unpooled");
+            System.setProperty("io.netty.noPreferDirect", "true");
+            System.setProperty("io.netty.noUnsafe", "true");
+            System.setProperty("io.netty.recycler.maxCapacityPerThread", "0");
+            System.setProperty("io.netty.leakDetection.level", "disabled");
             Boot.mountFileSystem();
             LogSink.log(1, "INFO", "TeaFabric", "Starting Minecraft 1.16.5 (Fabric, TeaVM Wasm GC)", null);
             if (Boot.config("vanillaMain") != null) {

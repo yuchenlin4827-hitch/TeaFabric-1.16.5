@@ -40,6 +40,17 @@ final class WebLauncher {
         }
     }
 
+    /** {@code ?server=wss://...}: connect right after start-up, like the vanilla {@code --server} argument. */
+    private static class_542.class_546 autoConnect() {
+        String server = Boot.config("server");
+        if (server == null || server.trim().isEmpty()) {
+            return new class_542.class_546(null, 25565);
+        }
+        // ServerAddress.parse (redirected to NetCompat for WebSocket URLs)
+        net.minecraft.class_639 address = net.minecraft.class_639.method_2950(server.trim());
+        return new class_542.class_546(address.method_2952(), address.method_2954());
+    }
+
     static void launch(String username, int width, int height) {
         File gameDir = new File(WebFileSystem.GAME_DIR);
         phase("CrashReport.initCrashReport", net.minecraft.class_128::method_24305);
@@ -56,7 +67,7 @@ final class WebLauncher {
                 new class_542.class_544(gameDir, new File(gameDir, "resourcepacks"), new File(gameDir, "assets"),
                         "1.16"),
                 new class_542.class_545(false, "1.16.5", "release", false, false),
-                new class_542.class_546(null, 25565));
+                autoConnect());
 
         Thread.currentThread().setName("Render thread");
         phase("RenderSystem.initRenderThread", RenderSystem::initRenderThread);
