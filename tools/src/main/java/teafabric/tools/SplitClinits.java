@@ -57,6 +57,13 @@ import org.objectweb.asm.tree.analysis.Frame;
  * live across it (backward liveness over the control-flow graph). Methods containing early returns or
  * monitors are left alone. Output: a jar with the rewritten classes, put ahead of the baked jar on the
  * TeaVM class path. Frames are not kept (TeaVM does not need them).
+ *
+ * <p>It also restores the JVM's class initialisation order. TeaVM 0.16 (Wasm GC) does not initialise a
+ * superclass before its subclass: in Minecraft {@code LivingEntity.<clinit>} ran before
+ * {@code Entity.<clinit>}, so {@code DataTracker.registerData} handed out ids that collide with
+ * Entity's ("Duplicate id value for 0!" when joining a server). Every class whose ancestors have a
+ * static initialiser gets a trigger method {@code teafabric$init()} and a {@code <clinit>} that starts
+ * by calling its superclass's trigger, which makes TeaVM initialise the superclass first.
  */
 public final class SplitClinits {
     private static final int MIN_INSNS = 2500;
@@ -89,21 +96,63 @@ public final class SplitClinits {
                 }
             }
         }
+        // Class initialisation order: which classes (or their ancestors) have a static initialiser.
+        Map<String, String> superOf = new HashMap<>();
+        Set<String> hasClinit = new HashSet<>();
+        Set<String> interfaces = new HashSet<>();
+        for (Map.Entry<String, byte[]> e : classes.entrySet()) {
+            String name = e.getKey().substring(0, e.getKey().length() - 6);
+            if (excluded(name)) {
+                continue;
+            }
+            ClassReader reader = new ClassReader(e.getValue());
+            superOf.put(name, reader.getSuperName());
+            if ((reader.getAccess() & Opcodes.ACC_INTERFACE) != 0) {
+                interfaces.add(name);
+            }
+            reader.accept(new org.objectweb.asm.ClassVisitor(Opcodes.ASM9) {
+                @Override
+                public org.objectweb.asm.MethodVisitor visitMethod(int access, String mname, String desc,
+                        String signature, String[] exceptions) {
+                    if (mname.equals("<clinit>")) {
+                        hasClinit.add(name);
+                    }
+                    return null;
+                }
+            }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        }
+        Map<String, Boolean> needsTrigger = new HashMap<>();
+        for (String name : superOf.keySet()) {
+            needsTrigger(name, superOf, hasClinit, interfaces, needsTrigger);
+        }
+
         Path out = Path.of(o.get("out"));
         Files.createDirectories(out.toAbsolutePath().getParent());
         int count = 0;
         int methods = 0;
+        int ordered = 0;
         try (OutputStream fos = Files.newOutputStream(out); ZipOutputStream zip = new ZipOutputStream(fos)) {
             for (Map.Entry<String, byte[]> e : classes.entrySet()) {
                 byte[] bytes = e.getValue();
+                String name = e.getKey().substring(0, e.getKey().length() - 6);
                 // TeaVM's own class library is renamed (T-prefixed) while loading; leave it alone.
-                if (e.getKey().startsWith("org/teavm/") || !mayHaveLargeClinit(bytes)) {
+                if (excluded(name)) {
+                    continue;
+                }
+                boolean trigger = Boolean.TRUE.equals(needsTrigger.get(name));
+                if (!trigger && !mayHaveLargeClinit(bytes)) {
                     continue;
                 }
                 ClassNode cn = new ClassNode();
                 new ClassReader(bytes).accept(cn, ClassReader.SKIP_FRAMES);
+                if (trigger) {
+                    String superName = cn.superName;
+                    addInitOrder(cn, superName != null && Boolean.TRUE.equals(needsTrigger.get(superName))
+                            ? superName : null);
+                    ordered++;
+                }
                 int parts = split(cn);
-                if (parts == 0) {
+                if (parts == 0 && !trigger) {
                     continue;
                 }
                 ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
@@ -113,12 +162,75 @@ public final class SplitClinits {
                 zip.putNextEntry(ze);
                 zip.write(cw.toByteArray());
                 zip.closeEntry();
-                count++;
-                methods += parts;
-                System.out.println("[split] " + cn.name + ".<clinit> -> " + parts + " methods");
+                if (parts > 0) {
+                    count++;
+                    methods += parts;
+                    System.out.println("[split] " + cn.name + ".<clinit> -> " + parts + " methods");
+                }
             }
         }
         System.out.println("[split] " + count + " class initialisers split into " + methods + " methods");
+        System.out.println("[init-order] " + ordered + " classes initialise their superclass first");
+    }
+
+    private static boolean excluded(String name) {
+        return name.startsWith("org/teavm/") || name.startsWith("java/") || name.startsWith("javax/")
+                || name.startsWith("jdk/") || name.startsWith("sun/");
+    }
+
+    /** A class needs a trigger if it, or a (program) ancestor class, has a static initialiser. */
+    private static boolean needsTrigger(String name, Map<String, String> superOf, Set<String> hasClinit,
+            Set<String> interfaces, Map<String, Boolean> memo) {
+        if (name == null || !superOf.containsKey(name) || interfaces.contains(name)) {
+            return false;
+        }
+        Boolean known = memo.get(name);
+        if (known != null) {
+            return known;
+        }
+        memo.put(name, false); // cycles cannot happen in valid class files; be safe anyway
+        boolean result = hasClinit.contains(name)
+                || needsTrigger(superOf.get(name), superOf, hasClinit, interfaces, memo);
+        memo.put(name, result);
+        return result;
+    }
+
+    static final String TRIGGER = "teafabric$init";
+
+    /**
+     * Adds the trigger method and, when the superclass needs initialising, makes {@code <clinit>} start with a
+     * call to the superclass's trigger (TeaVM initialises a class before running one of its static methods).
+     */
+    private static void addInitOrder(ClassNode cn, String superToInit) {
+        boolean present = false;
+        MethodNode clinit = null;
+        for (MethodNode m : cn.methods) {
+            if (m.name.equals(TRIGGER) && m.desc.equals("()V")) {
+                present = true;
+            }
+            if (m.name.equals("<clinit>")) {
+                clinit = m;
+            }
+        }
+        if (!present) {
+            MethodNode trigger = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC,
+                    TRIGGER, "()V", null, null);
+            trigger.instructions.add(new InsnNode(Opcodes.RETURN));
+            trigger.maxStack = 0;
+            trigger.maxLocals = 0;
+            cn.methods.add(trigger);
+        }
+        if (superToInit == null) {
+            return;
+        }
+        if (clinit == null) {
+            clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
+            clinit.instructions.add(new InsnNode(Opcodes.RETURN));
+            clinit.maxStack = 0;
+            clinit.maxLocals = 0;
+            cn.methods.add(clinit);
+        }
+        clinit.instructions.insert(new MethodInsnNode(Opcodes.INVOKESTATIC, superToInit, TRIGGER, "()V", false));
     }
 
     /** Cheap pre-filter: class files with a big code attribute somewhere. */
