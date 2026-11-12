@@ -304,7 +304,26 @@ public final class TFormatter implements Closeable, Flushable {
                 format.setPositivePrefix(" ");
             }
 
-            String str = format.format(arg);
+            // TeaFabric patch: like java.util.Formatter, round the shortest decimal representation of the
+            // value half-up ("%.2f" of 1.005 is "1.01", "%.1f" of 0.25 is "0.3"); TeaVM used DecimalFormat's
+            // default HALF_EVEN on the binary value.
+            Object value = arg;
+            if (arg instanceof Double || arg instanceof Float) {
+                double d = ((Number) arg).doubleValue();
+                if (!Double.isNaN(d) && !Double.isInfinite(d) && d != 0) {
+                    // Rounded here: TeaVM's DecimalFormat mis-rounds BigDecimals (99.95 -> ":0.0").
+                    value = new BigDecimal(arg instanceof Float ? Float.toString((Float) arg) : Double.toString(d))
+                            .setScale(precision, java.math.RoundingMode.HALF_UP);
+                } else if (d == 0 && 1 / d < 0) {
+                    // -0.0 keeps its sign, as in java.util.Formatter.
+                    String negativePrefix = format.getNegativePrefix();
+                    String negativeSuffix = format.getNegativeSuffix();
+                    format.setPositivePrefix(negativePrefix != null ? negativePrefix : "-");
+                    format.setPositiveSuffix(negativeSuffix != null ? negativeSuffix : "");
+                    value = 0.0;
+                }
+            }
+            String str = format.format(value);
 
             precision = -1; // prevent formatGivenString from trimming
 
