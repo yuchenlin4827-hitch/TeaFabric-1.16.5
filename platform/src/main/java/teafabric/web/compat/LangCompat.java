@@ -148,4 +148,8 @@ public final class LangCompat {
     public static boolean desiredAssertionStatus(Class<?> cls) {
         return false;
     }
+
+    /** {@code Thread.setContextClassLoader}: there are no class loaders; accepted and ignored. */
+    public static void setContextClassLoader(Thread thread, ClassLoader loader) {
+    }
 }

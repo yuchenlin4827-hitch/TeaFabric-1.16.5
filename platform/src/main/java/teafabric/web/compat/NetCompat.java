@@ -141,6 +141,21 @@ public final class NetCompat {
         return new class_2889(address, port, state);
     }
 
+    /**
+     * {@code ResourceLeakDetector.addExclusions(type, methodNames)}: only validates the names with
+     * {@code getDeclaredMethods()} (no reflection data here, so it always failed in the static
+     * initialiser of Netty's buffer allocators) and tunes leak reports, which are disabled.
+     */
+    public static void addExclusions(Class<?> type, String... methodNames) {
+    }
+
+    /**
+     * {@code ObjectCleaner.register(object, cleanupTask)}: would start a daemon thread polling a
+     * ReferenceQueue to clean thread-locals of dead threads. Not needed with a handful of green threads.
+     */
+    public static void register(Object object, Runnable cleanupTask) {
+    }
+
     /** Legacy (pre-1.7) server list ping over a raw NIO socket: not possible here. */
     public static void method_3001(class_644 pinger, class_642 server) {
     }

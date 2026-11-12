@@ -73,3 +73,7 @@ net.minecraft.class_2889  <init>               (Ljava/lang/String;ILnet/minecraf
 java.net.IDN              toASCII              (Ljava/lang/String;)Ljava/lang/String;       -> teafabric.web.compat.NetCompat
 # Text fields keep their initial focus (any receiver class: the call sites name the Screen subclass)
 *net.minecraft.class_4069 method_20085         (Lnet/minecraft/class_364;)V                 -> teafabric.web.compat.MinecraftCompat
+# Netty on TeaVM
+io.netty.util.ResourceLeakDetector addExclusions (Ljava/lang/Class;[Ljava/lang/String;)V     -> teafabric.web.compat.NetCompat
+io.netty.util.internal.ObjectCleaner register  (Ljava/lang/Object;Ljava/lang/Runnable;)V    -> teafabric.web.compat.NetCompat
+*java.lang.Thread         setContextClassLoader (Ljava/lang/ClassLoader;)V                  -> teafabric.web.compat.LangCompat
