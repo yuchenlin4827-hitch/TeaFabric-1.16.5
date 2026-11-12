@@ -24,8 +24,43 @@ public final class WebResources {
         return dot < 0 ? name : cn.substring(0, dot).replace('.', '/') + "/" + name;
     }
 
+    private static String[] modRoots;
+
+    /**
+     * Like a class loader over Minecraft plus every mod jar: Minecraft's resources sit at the root of
+     * {@code /classpath}, each other mod's under {@code teafabric/mods/<id>/} (see the baker), so a
+     * name missing at the root is looked up in the mod roots too (ViaVersion's mapping data, config
+     * defaults bundled in mods, ...).
+     */
     public static File file(Class<?> cls, String name) {
-        return new File(WebFileSystem.CLASSPATH_DIR + "/" + resolve(cls, name));
+        String rel = resolve(cls, name);
+        File f = new File(WebFileSystem.CLASSPATH_DIR + "/" + rel);
+        if (f.exists() || rel.isEmpty()) {
+            return f;
+        }
+        for (String root : modRoots()) {
+            File g = new File(root + "/" + rel);
+            if (g.exists()) {
+                return g;
+            }
+        }
+        return f;
+    }
+
+    private static String[] modRoots() {
+        if (modRoots == null) {
+            File[] dirs = new File(WebFileSystem.CLASSPATH_DIR + "/teafabric/mods").listFiles();
+            if (dirs == null) {
+                return new String[0]; // not mounted yet: don't cache
+            }
+            java.util.Arrays.sort(dirs);
+            String[] roots = new String[dirs.length];
+            for (int i = 0; i < dirs.length; i++) {
+                roots[i] = dirs[i].getPath();
+            }
+            modRoots = roots;
+        }
+        return modRoots;
     }
 
     public static InputStream getResourceAsStream(Class<?> cls, String name) {

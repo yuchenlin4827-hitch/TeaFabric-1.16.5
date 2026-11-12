@@ -37,7 +37,7 @@ for attempt in 1 2 3 4 5 6; do
     compiled=1
     break
   fi
-  missing=$(grep -c . build/teavm/wasm-gc/missing.tsv 2>/dev/null || echo 0)
+  missing=$(cat build/teavm/wasm-gc/missing.tsv 2>/dev/null | grep -c .)
   if [ "$missing" -eq 0 ]; then
     echo "compileWeb failed for a reason other than missing APIs; see the output above." >&2
     exit 1

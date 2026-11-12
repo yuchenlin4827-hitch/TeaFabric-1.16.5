@@ -58,6 +58,14 @@ public final class MinecraftCompat {
         return pooled() ? net.minecraft.class_156.method_28124() : INLINE;
     }
 
+    /**
+     * {@code new MinecraftVersion(versionJson)}: parses the build date with java.time, which TeaVM lacks.
+     * The built-in default describes the same release (1.16.5, world 2586, protocol 754, pack 6).
+     */
+    public static net.minecraft.class_3797 constructclass_3797(com.google.gson.JsonObject json) {
+        return (net.minecraft.class_3797) net.minecraft.class_3797.field_25319;
+    }
+
     /** Util.startTimerHack: a Windows timer-resolution workaround (a thread sleeping forever). */
     public static void method_29476() {
     }

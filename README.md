@@ -145,10 +145,37 @@ log in to Microsoft accounts or reach Mojang's session servers.
 
 Fabric mods (jars for Minecraft 1.16.5) go into `./mods`; run `scripts/build-web.sh` again. Mods
 are baked in at build time: Fabric Loader and Mixin run during `gradle bake`, and TeaVM compiles the
-game and the mods together into one WebAssembly module. A page cannot load a mod jar by itself
-afterwards: there is no JVM, class loader or bytecode in the browser, only compiled Wasm. Resource
-packs are data, not code: dropping a pack zip on the Resource Packs screen should work without a
-rebuild (not tested yet).
+game and the mods together into one WebAssembly module. Nested jars (jar-in-jar), multi-release jars
+and classes that MixinExtras generates while applying mixins are all baked in; mod resources stay
+reachable through the class path (`getResourceAsStream`) as on a JVM.
+
+**Loading a mod jar into a running page is not possible**, and no amount of patching changes that:
+
+* there is no JVM, class loader or bytecode in the page, only Wasm compiled ahead of time from the
+  whole program (dead code removed, calls devirtualised and inlined across Minecraft and all mods);
+* a Fabric mod is mostly mixins, which rewrite *Minecraft's own* methods; those methods are already
+  machine code, compiled with the mixins of the mods present at build time;
+* the alternative, a JVM interpreter written for Wasm running the whole game, would be an entirely
+  different project and orders of magnitude slower.
+
+What does work without a rebuild:
+
+* **Resource packs**: drag the pack `.zip` onto the page while the Resource Packs screen is open.
+* **Data packs**: drag them onto Create World → Data Packs (singleplayer), or install them on a server.
+* **Server-side mods and plugins** of the server you connect to (anything that needs no client code).
+
+Rebuilding after adding jars to `./mods` takes about 15–25 minutes (bake + TeaVM + packaging), and
+the result is a new static `build/web` directory to serve.
+
+### Server protocol: 1.12.2 / 1.16.5 (ViaFabric)
+
+With [ViaFabric](https://modrinth.com/mod/viafabric) 0.4.x (it includes ViaVersion) in `./mods`, the
+1.16.5 client can join servers running older versions (1.8 – 1.16.4) — ViaVersion translates in the
+newer-client-to-older-server direction, so no ViaBackwards is needed. Pick the version with the **Via**
+button on the Multiplayer screen (it turns client-side translation on and sets the protocol), or open
+the page with `?protocol=1.12.2` (also `?protocol=auto` or a protocol number); `?protocol=1.16.5`
+connects natively. The in-game setting lives in the in-memory game directory, so it lasts until the
+page is reloaded; the URL switch is applied at every start.
 
 Page switches (debugging): `?log` (log overlay), `?username=Name`, `?threads` (Minecraft worker pools
 on green threads instead of inline), `?trace` (GL upload/draw trace), `?beacon` (log lines are sent to
@@ -170,11 +197,16 @@ Working:
   the Mojang loading screen, and the **title screen** (panorama, logo, splash text, buttons, mouse
   hover) rendered through WebGL 2 and the fixed-function shader JIT, frame-paced by
   `requestAnimationFrame`.
+* Text input in screens (letters, IME / Chinese, clipboard), multiplayer over `ws://` / `wss://`
+  (joining a 1.16.5 server, world rendering, walking, chat, the F3 screen).
+* TeaVM class-library bugs found by running the same programs on the JVM and in the browser and
+  diffing the output, all patched in `compiler/src/runtime`: `ArrayDeque` iterator removal,
+  `ListIterator.add`, `java.util.Random` (now bit-identical to the JDK), `Math.round/rint/ulp/cbrt/log10`,
+  `String.format` (`%%`, `%n`, `%f` rounding and `-0.0`), superclass-first static initialisation (in the
+  `SplitClinits` pre-pass), `ConcurrentHashMap.newKeySet`, `Logger(String, String)`.
 
 Not working yet / known issues:
 
-* Not tried yet beyond the title screen: Singleplayer (integrated server), world rendering, keyboard
-  text input in screens.
 * Fixed on the way to the title screen (TeaVM 0.16.0 issues, all patched in `compiler/`):
   `@Async` implementations were coroutine-transformed when anything they call may suspend
   (`AsyncMethodFinder`; `Object.wait` never released its monitor, `requestAnimationFrame` was never

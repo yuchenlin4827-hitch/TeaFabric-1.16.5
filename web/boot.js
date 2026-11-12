@@ -26,7 +26,8 @@
       debug: params.has('debug') ? '1' : null,
       netdebug: params.has('netdebug') ? '1' : null,
       server: params.get('server'),
-      proxy: params.get('proxy')
+      proxy: params.get('proxy'),
+      protocol: params.get('protocol')
     }
   };
 

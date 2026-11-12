@@ -37,7 +37,10 @@ import org.teavm.model.instructions.InvokeInstruction;
  *
  * An instance call {@code owner.m(args)} becomes {@code target.m(owner, args)}; a static call keeps
  * its parameter list. An owner written as {@code *owner.Class} matches the method on any receiver class
- * (call sites of inherited/default methods name the subclass); the target still takes {@code owner.Class}. Constructors ({@code <init>}) are not supported. Classes whose name starts
+ * (call sites of inherited/default methods name the subclass); the target still takes {@code owner.Class}.
+ * A target written as {@code target.Class#name(desc)} names the replacement exactly (the receiver, if any,
+ * becomes its first parameter): it can take {@code Object} for types the platform layer cannot compile
+ * against, such as classes of an optional mod. Constructors ({@code <init>}) are not supported. Classes whose name starts
  * with an excluded prefix (the redirect targets themselves, TeaVM's class library) are untouched.
  */
 public class RedirectTransformer implements ClassHolderTransformer {
@@ -152,6 +155,21 @@ public class RedirectTransformer implements ClassHolderTransformer {
         }
         if (ref.getName().equals("<init>")) {
             rewriteConstructor(insn, ref, target);
+            return;
+        }
+        int hash = target.indexOf('#');
+        if (hash >= 0) {
+            List<? extends Variable> args = insn.getArguments();
+            List<Variable> newArgs = new ArrayList<>();
+            if (insn.getInstance() != null) {
+                newArgs.add(insn.getInstance());
+            }
+            newArgs.addAll(args);
+            insn.setInstance(null);
+            insn.setType(InvocationType.SPECIAL);
+            insn.setMethod(new MethodReference(target.substring(0, hash),
+                    MethodDescriptor.parse(target.substring(hash + 1))));
+            insn.setArguments(newArgs.toArray(new Variable[0]));
             return;
         }
         if (insn.getInstance() == null) {

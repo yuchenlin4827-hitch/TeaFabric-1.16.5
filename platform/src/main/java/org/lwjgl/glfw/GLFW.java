@@ -334,6 +334,7 @@ public class GLFW {
         }
         // Network input is delivered on the render thread too (see WebSocketChannel).
         teafabric.web.net.WebSocketChannel.pumpAll();
+        teafabric.web.net.MemoryChannel.pumpAll(); // singleplayer: client <-> integrated server
     }
 
     private static void dispatch(int type, double a, double b, int c, int d) {

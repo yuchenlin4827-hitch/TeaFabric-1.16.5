@@ -119,6 +119,7 @@ public final class Baker implements PreLaunchEntrypoint {
         resources.put("teafabric/mods.json", json.toString().getBytes(StandardCharsets.UTF_8));
 
         generateSyntheticClasses();
+        collectMixinExtrasClasses();
         classes.put(EntrypointGenerator.CLASS_NAME, new EntrypointGenerator(classes).generate(entrypoints));
         classes.put(GenericSupersGenerator.CLASS_NAME, new GenericSupersGenerator(classes).generate());
 
@@ -179,8 +180,20 @@ public final class Baker implements PreLaunchEntrypoint {
         try (Stream<Path> walk = Files.walk(root)) {
             walk.filter(Files::isRegularFile).forEach(files::add);
         }
+        Map<String, Path> multiRelease = new LinkedHashMap<>();
+        Map<String, Integer> multiReleaseVersion = new LinkedHashMap<>();
         for (Path file : files) {
             String rel = root.relativize(file).toString().replace('\\', '/');
+            int version = multiReleaseVersion(rel);
+            if (version > 0 && version <= Runtime.version().feature()) {
+                // Multi-release jar: on the JVM this class shadows (or only exists in) the root.
+                String internal = rel.substring(rel.indexOf('/', "META-INF/versions/".length()) + 1, rel.length() - 6);
+                Integer seen = multiReleaseVersion.get(internal);
+                if (seen == null || seen < version) {
+                    multiReleaseVersion.put(internal, version);
+                    multiRelease.put(internal, file);
+                }
+            }
             if (rel.startsWith("META-INF/") && (rel.endsWith(".SF") || rel.endsWith(".RSA")
                     || rel.endsWith(".DSA") || rel.equals("META-INF/MANIFEST.MF"))) {
                 continue;
@@ -212,6 +225,34 @@ public final class Baker implements PreLaunchEntrypoint {
                 continue;
             }
             classes.put(internal, transform(launcher, modId, internal, raw));
+        }
+        // Versioned classes without a root counterpart (e.g. the jvmdg API stubs that ViaVersion's
+        // downgraded build only ships under META-INF/versions/N/). Root classes win otherwise: they are the
+        // Java 8 variants, which TeaVM's class library covers best.
+        for (Map.Entry<String, Path> e : multiRelease.entrySet()) {
+            String internal = e.getKey();
+            if (!classes.containsKey(internal)) {
+                classes.put(internal, transform(launcher, modId, internal, Files.readAllBytes(e.getValue())));
+                System.out.println("[baker] Multi-release class " + internal + " (Java "
+                        + multiReleaseVersion.get(internal) + ")");
+            }
+        }
+    }
+
+    /** N for {@code META-INF/versions/N/...class}, otherwise 0. */
+    private static int multiReleaseVersion(String rel) {
+        if (!rel.startsWith("META-INF/versions/") || !rel.endsWith(".class")) {
+            return 0;
+        }
+        int start = "META-INF/versions/".length();
+        int slash = rel.indexOf('/', start);
+        if (slash < 0) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(rel.substring(start, slash));
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 
@@ -279,6 +320,34 @@ public final class Baker implements PreLaunchEntrypoint {
                 scanReferences(generated, queue, seen);
             } else {
                 System.err.println("[baker] Could not generate synthetic class " + name);
+            }
+        }
+    }
+
+    /**
+     * MixinExtras defines classes at runtime while mixins are applied, e.g. the {@code LocalRef}
+     * implementations behind {@code @Local LocalRef<T>} parameters (ViaFabric uses them). They exist only
+     * in its in-memory table, so they are copied from there after everything has been transformed.
+     */
+    @SuppressWarnings("unchecked")
+    private void collectMixinExtrasClasses() {
+        Set<ClassLoader> loaders = new java.util.LinkedHashSet<>();
+        loaders.add(Baker.class.getClassLoader());
+        loaders.add(MixinEnvironment.class.getClassLoader());
+        loaders.add(Thread.currentThread().getContextClassLoader());
+        for (ClassLoader loader : loaders) {
+            Map<String, byte[]> definitions;
+            try {
+                Class<?> utils = Class.forName("com.llamalad7.mixinextras.utils.ClassGenUtils", true, loader);
+                definitions = (Map<String, byte[]>) utils.getMethod("getDefinitions").invoke(null);
+            } catch (ReflectiveOperationException | LinkageError e) {
+                continue;
+            }
+            for (Map.Entry<String, byte[]> e : definitions.entrySet()) {
+                String name = e.getKey().replace('.', '/');
+                if (classes.putIfAbsent(name, e.getValue()) == null) {
+                    System.out.println("[baker] MixinExtras generated class " + name);
+                }
             }
         }
     }

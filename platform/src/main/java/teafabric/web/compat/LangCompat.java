@@ -53,6 +53,41 @@ public final class LangCompat {
 
     // ---- Class
 
+    /** Redirect target that drops a call (see redirects.txt). */
+    public static void ignore(Object receiver) {
+    }
+
+    // ---- Java 9-16 APIs as called by mods downgraded to Java 8 with JvmDowngrader ("jvmdg" stubs). Their
+    // own stubs find the real methods through JDK internals (Class.forName("java.util.stream.ReferencePipeline")),
+    // which do not exist here; see redirects.txt.
+
+    public static <T> T[] toArray(java.util.Collection<T> collection, java.util.function.IntFunction<T[]> generator) {
+        return collection.toArray(generator.apply(0));
+    }
+
+    public static boolean isEmpty(java.util.Optional<?> optional) {
+        return !optional.isPresent();
+    }
+
+    public static <T> java.util.List<T> toList(java.util.stream.Stream<T> stream) {
+        java.util.List<T> list = new java.util.ArrayList<>();
+        stream.forEachOrdered(list::add);
+        return java.util.Collections.unmodifiableList(list);
+    }
+
+    /** {@code Runtime.version()}: no version object; {@link #runtimeFeatureVersion} answers for it. */
+    public static Object runtimeVersion() {
+        return null;
+    }
+
+    /**
+     * {@code Runtime.version().feature()}: 8, the level TeaVM's class library resembles most, so libraries pick
+     * their portable code paths (e.g. ViaVersion's own CRC32C instead of java.util.zip.CRC32C).
+     */
+    public static int runtimeFeatureVersion(Object version) {
+        return 8;
+    }
+
     public static URL getResource(Class<?> cls, String name) {
         return WebResources.getResource(cls, name);
     }

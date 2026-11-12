@@ -81,3 +81,15 @@ io.netty.buffer.ByteBufUtil decodeString        (Lio/netty/buffer/ByteBuf;IILjav
 io.netty.util.ResourceLeakDetector addExclusions (Ljava/lang/Class;[Ljava/lang/String;)V     -> teafabric.web.compat.NetCompat
 io.netty.util.internal.ObjectCleaner register  (Ljava/lang/Object;Ljava/lang/Runnable;)V    -> teafabric.web.compat.NetCompat
 *java.lang.Thread         setContextClassLoader (Ljava/lang/ClassLoader;)V                  -> teafabric.web.compat.LangCompat
+io.netty.bootstrap.ServerBootstrap bind         ()Lio/netty/channel/ChannelFuture;           -> teafabric.web.compat.NetCompat
+net.minecraft.class_2535  method_10756          ()Z                                          -> teafabric.web.compat.NetCompat
+# ViaVersion (optional mod): its Java version check needs Runtime.version(), which its Java 8 build only
+# provides through a multi-release jar; it would only print a warning anyway.
+com.viaversion.viaversion.ViaManagerImpl checkJavaVersion ()V                              -> teafabric.web.compat.LangCompat#ignore(Ljava/lang/Object;)V
+net.minecraft.class_3797  <init>                (Lcom/google/gson/JsonObject;)V              -> teafabric.web.compat.MinecraftCompat
+# JvmDowngrader stubs inside ViaVersion's Java 8 build (relocated to viaversion.xyz.wagyourtail.jvmdg).
+viaversion.xyz.wagyourtail.jvmdg.j11.stub.java_base.J_U_Collection toArray (Ljava/util/Collection;Ljava/util/function/IntFunction;)[Ljava/lang/Object; -> teafabric.web.compat.LangCompat
+viaversion.xyz.wagyourtail.jvmdg.j11.stub.java_base.J_U_Optional isEmpty (Ljava/util/Optional;)Z -> teafabric.web.compat.LangCompat
+viaversion.xyz.wagyourtail.jvmdg.j16.stub.java_base.J_U_S_Stream toList (Ljava/util/stream/Stream;)Ljava/util/List; -> teafabric.web.compat.LangCompat
+viaversion.xyz.wagyourtail.jvmdg.j9.stub.java_base.J_L_Runtime version ()Lviaversion/xyz/wagyourtail/jvmdg/j9/stub/java_base/J_L_Runtime$Version; -> teafabric.web.compat.LangCompat#runtimeVersion()Ljava/lang/Object;
+viaversion.xyz.wagyourtail.jvmdg.j10.stub.java_base.J_L_Runtime$Version feature (Lviaversion/xyz/wagyourtail/jvmdg/j9/stub/java_base/J_L_Runtime$Version;)I -> teafabric.web.compat.LangCompat#runtimeFeatureVersion(Ljava/lang/Object;)I

@@ -224,6 +224,11 @@ public final class NetCompat {
 
     /** {@code Bootstrap.connect(SocketAddress)}. */
     public static ChannelFuture connect(Bootstrap bootstrap, SocketAddress address) {
+        if (address instanceof io.netty.channel.local.LocalAddress) {
+            // Singleplayer: the client connecting to its integrated server.
+            return teafabric.web.net.MemoryChannel.connect(bootstrap.config().handler(),
+                    (io.netty.channel.local.LocalAddress) address);
+        }
         InetSocketAddress a = (InetSocketAddress) address;
         return connect(bootstrap, a.getHostString(), a.getPort());
     }
@@ -273,6 +278,29 @@ public final class NetCompat {
         channel.pipeline().fireChannelActive();
         channel.register();
         return channel.newSucceededFuture();
+    }
+
+    /**
+     * {@code ServerBootstrap.bind()}: the integrated server binding Netty's local transport gets an in-memory
+     * one; a browser page cannot listen on a real port ("Open to LAN").
+     */
+    public static ChannelFuture bind(io.netty.bootstrap.ServerBootstrap bootstrap) {
+        if (bootstrap.config().localAddress() instanceof io.netty.channel.local.LocalAddress) {
+            return teafabric.web.net.MemoryChannel.bind(bootstrap.config().childHandler());
+        }
+        io.netty.channel.embedded.EmbeddedChannel channel = new io.netty.channel.embedded.EmbeddedChannel();
+        ChannelFuture future = channel.newFailedFuture(
+                new java.net.BindException("A web page cannot accept connections (Open to LAN)"));
+        channel.close();
+        return future;
+    }
+
+    /**
+     * {@code ClientConnection.isLocal()}: vanilla tests for Netty's LocalChannel; the in-memory pair stands in
+     * for it (no compression, no encryption, packets passed as objects).
+     */
+    public static boolean method_10756(net.minecraft.class_2535 connection) {
+        return connection.method_10755() instanceof io.netty.channel.local.LocalAddress || connection.method_10756();
     }
 
     private static ChannelFuture failed(String host, int port, ConnectFailure failure) {
