@@ -94,6 +94,16 @@ Put additional Fabric mods (release jars for 1.16.5) into `./mods/`; they are ba
 Requirements: JDK 21, Gradle 8.14 (or the wrapper), ~6 GB RAM for TeaVM, network access to
 piston-meta/piston-data/libraries/resources (Mojang), meta/maven.fabricmc.net and Maven Central.
 
+One command does everything below (download on the first run, bake, compile with the stub loop,
+package):
+
+```bash
+scripts/build-web.sh                          # game + Fabric API + every jar in ./mods
+python3 -m http.server -d build/web 8080      # open http://localhost:8080/
+```
+
+The individual steps:
+
 ```bash
 gradle :tools:setupMinecraft          # download Minecraft 1.16.5 + latest Fabric (once)
 gradle :tools:remapIntermediary       # intermediary client (compile classpath for web mods)
@@ -109,12 +119,44 @@ Useful properties: `-PteavmFast=true` (fast dependency analysis), `-PteavmOpt=SI
 `-PteavmDeobfuscation=false`, `-PteavmHeap=8g` (compiler JVM heap), `-PteavmMaxHeap=1024` (Wasm heap, MiB),
 `-PteavmTarget=js` (TeaVM JavaScript backend instead of Wasm GC), `-PwebLanguages=all` or `=zh_tw,ja_jp`.
 
+## Multiplayer
+
+A web page cannot open TCP connections, so the game connects to servers through a small
+WebSocket-to-TCP relay. Run it next to (or in front of) the Minecraft server:
+
+```bash
+node proxy/ws-proxy.js --target mc.example.com:25565            # ws://<this host>:8081/
+node proxy/ws-proxy.js --target localhost:25565 --listen 443 --cert cert.pem --key key.pem   # wss://
+```
+
+In the game, enter the relay's address as the server address (Add Server or Direct Connection), e.g.
+`wss://proxy.example.com/` or `ws://192.168.1.10:8081`. A relay started with `--allow host1,host2`
+(or `--allow-any`, an open relay) lets the address choose the server:
+`wss://proxy.example.com/?target=mc.example.com:25565`. A page opened as `index.html?proxy=wss://…`
+accepts plain `host:port` addresses and sends them through that relay; `index.html?server=wss://…`
+connects right after start-up. Pages served over `https://` can only use `wss://`.
+
+The relay has no dependencies (Node.js 16+); `node proxy/ws-proxy.js --help` lists the options
+(listen address, allow-list, TLS, allowed page origins). Only offline-mode servers can be joined
+(`online-mode=false`, or a proxy such as Velocity/Bungee handling authentication): a browser cannot
+log in to Microsoft accounts or reach Mojang's session servers.
+
+## Mods
+
+Fabric mods (jars for Minecraft 1.16.5) go into `./mods`; run `scripts/build-web.sh` again. Mods
+are baked in at build time: Fabric Loader and Mixin run during `gradle bake`, and TeaVM compiles the
+game and the mods together into one WebAssembly module. A page cannot load a mod jar by itself
+afterwards: there is no JVM, class loader or bytecode in the browser, only compiled Wasm. Resource
+packs are data, not code: dropping a pack zip on the Resource Packs screen should work without a
+rebuild (not tested yet).
+
 Page switches (debugging): `?log` (log overlay), `?username=Name`, `?threads` (Minecraft worker pools
 on green threads instead of inline), `?trace` (GL upload/draw trace), `?beacon` (log lines are sent to
 the HTTP server, survives renderer crashes), `?nogl`, `?noaudio`, `?nobuiltins`, `?nodeobf`,
 `?nofinalize` / `?noweak` (no GC callbacks into Wasm / strong weak references), `?waits` (print the
 Java stack of any lock/future/park wait blocked for more than 5 s: finds green-thread deadlocks),
-`?vanillaMain` (start through `net.minecraft.client.main.Main`).
+`?vanillaMain` (start through `net.minecraft.client.main.Main`), `?debug` (DEBUG log level),
+`?netdebug` (stacks for disconnects and closed connections).
 
 ## Status
 
