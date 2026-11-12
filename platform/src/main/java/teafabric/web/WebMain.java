@@ -43,6 +43,9 @@ public final class WebMain {
             System.setProperty("io.netty.noUnsafe", "true");
             System.setProperty("io.netty.recycler.maxCapacityPerThread", "0");
             System.setProperty("io.netty.leakDetection.level", "disabled");
+            if (Boot.config("debug") != null) {
+                org.apache.logging.log4j.LogManager.setThreshold(org.apache.logging.log4j.Level.DEBUG);
+            }
             Boot.mountFileSystem();
             LogSink.log(1, "INFO", "TeaFabric", "Starting Minecraft 1.16.5 (Fabric, TeaVM Wasm GC)", null);
             if (Boot.config("vanillaMain") != null) {

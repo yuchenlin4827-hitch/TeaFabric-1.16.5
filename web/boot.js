@@ -23,6 +23,8 @@
       trace: params.has('trace') ? '1' : null,
       vanillaMain: params.has('vanillaMain') ? '1' : null,
       waits: params.has('waits') ? '1' : null,
+      debug: params.has('debug') ? '1' : null,
+      netdebug: params.has('netdebug') ? '1' : null,
       server: params.get('server'),
       proxy: params.get('proxy')
     }

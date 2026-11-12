@@ -156,6 +156,50 @@ public final class NetCompat {
     public static void register(Object object, Runnable cleanupTask) {
     }
 
+    /**
+     * {@code ClientConnection.disconnect(reason)}: record why. Minecraft logs most of these only at DEBUG
+     * and the "Connection Lost" screen can be terse; {@code ?netdebug} adds the requesting stack.
+     */
+    public static void method_10747(net.minecraft.class_2535 connection, net.minecraft.class_2561 reason) {
+        String text;
+        try {
+            text = reason == null ? "(no reason)" : reason.getString();
+        } catch (Throwable t) {
+            text = String.valueOf(reason);
+        }
+        LogSink.log(1, "INFO", "Network", "Disconnecting: " + text,
+                Boot.config("netdebug") != null ? new Throwable("disconnect requested here") : null);
+        connection.method_10747(reason);
+    }
+
+    /**
+     * {@code ChannelHandler.exceptionCaught(ctx, cause)} as Netty invokes it: logs the exception that ends a
+     * Minecraft connection (vanilla only logs it at DEBUG, and the disconnect screen shows just its class).
+     */
+    public static void exceptionCaught(io.netty.channel.ChannelHandler handler,
+            io.netty.channel.ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        if (handler instanceof net.minecraft.class_2535) {
+            LogSink.log(3, "ERROR", "Network", "Connection error", cause);
+        }
+        handler.exceptionCaught(ctx, cause);
+    }
+
+    /**
+     * {@code ByteBufUtil.decodeString(src, readerIndex, len, charset)} (behind {@code ByteBuf.toString}, which
+     * Minecraft's {@code PacketByteBuf.readString} uses): Netty decodes into a reused {@code CharBuffer} sized
+     * exactly for the input, and TeaVM's UTF-8 decoder reports an overflow for an exactly sized buffer, so
+     * every string in a packet failed ("DecoderException: BufferOverflowException" right after joining).
+     */
+    public static String decodeString(io.netty.buffer.ByteBuf src, int readerIndex, int len,
+            java.nio.charset.Charset charset) {
+        if (len == 0) {
+            return "";
+        }
+        byte[] bytes = new byte[len];
+        src.getBytes(readerIndex, bytes);
+        return new String(bytes, charset);
+    }
+
     /** Legacy (pre-1.7) server list ping over a raw NIO socket: not possible here. */
     public static void method_3001(class_644 pinger, class_642 server) {
     }

@@ -188,6 +188,9 @@ public final class WebSocketChannel extends EmbeddedChannel implements SocketCha
 
     @Override
     protected void doClose() throws Exception {
+        if (teafabric.web.Boot.config("netdebug") != null) {
+            LogSink.log(1, "INFO", "WebSocket", "Closing " + url, new Throwable("channel closed here"));
+        }
         super.doClose();
         release();
     }
