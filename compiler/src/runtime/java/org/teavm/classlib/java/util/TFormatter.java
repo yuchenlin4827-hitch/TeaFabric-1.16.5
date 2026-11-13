@@ -250,6 +250,14 @@ public final class TFormatter implements Closeable, Flushable {
                 case 'f':
                     formatFloat(specifier, false);
                     break;
+                case 'e':
+                case 'E':
+                    formatScientific(specifier == 'E');
+                    break;
+                case 'g':
+                case 'G':
+                    formatGeneral(specifier == 'G');
+                    break;
 
                 case '%':
                     out.append("%");
@@ -260,6 +268,116 @@ public final class TFormatter implements Closeable, Flushable {
                 default:
                     throw new UnknownFormatConversionException(String.valueOf(specifier));
             }
+        }
+
+        // TeaFabric patch: %e and %g (TeaVM rejected them; Guava's Stopwatch.toString uses "%.4g"). Digits come
+        // from the shortest decimal representation rounded half-up, like java.util.Formatter. Only width and '-'
+        // are honoured among the flags.
+
+        private String nonFinite(Object arg) {
+            double d = ((Number) arg).doubleValue();
+            if (Double.isNaN(d)) {
+                return "NaN";
+            }
+            return d > 0 ? "Infinity" : "-Infinity";
+        }
+
+        private BigDecimal decimalArg(char specifier) {
+            Object arg = args[argumentIndex];
+            if (arg instanceof BigDecimal) {
+                return (BigDecimal) arg;
+            }
+            if (arg instanceof Float) {
+                return new BigDecimal(Float.toString((Float) arg));
+            }
+            if (arg instanceof Double) {
+                return new BigDecimal(Double.toString((Double) arg));
+            }
+            throw new IllegalFormatConversionException(specifier, arg == null ? null : arg.getClass());
+        }
+
+        private boolean isNonFinite() {
+            Object arg = args[argumentIndex];
+            return (arg instanceof Double || arg instanceof Float)
+                    && (Double.isNaN(((Number) arg).doubleValue()) || Double.isInfinite(((Number) arg).doubleValue()));
+        }
+
+        private boolean isNegativeZero() {
+            Object arg = args[argumentIndex];
+            if (arg instanceof Double || arg instanceof Float) {
+                double d = ((Number) arg).doubleValue();
+                return d == 0 && 1 / d < 0;
+            }
+            return false;
+        }
+
+        /** Rounds a positive value to n significant digits, half-up (setScale; TeaVM's round(MathContext) truncated). */
+        private BigDecimal roundSignificant(BigDecimal v, int n) {
+            int exponent = v.precision() - v.scale() - 1;
+            BigDecimal r = v.setScale(n - 1 - exponent, java.math.RoundingMode.HALF_UP);
+            if (r.precision() > n) { // 9.99.. carried into a new digit
+                r = r.setScale(r.scale() - 1, java.math.RoundingMode.HALF_UP);
+            }
+            return r;
+        }
+
+        private String scientific(BigDecimal v, int digitsAfterPoint, boolean negativeZero) {
+            String sign = v.signum() < 0 || negativeZero ? "-" : "";
+            String digits;
+            int exponent;
+            if (v.signum() == 0) {
+                digits = "0";
+                exponent = 0;
+            } else {
+                BigDecimal r = roundSignificant(v.abs(), digitsAfterPoint + 1);
+                digits = r.unscaledValue().toString();
+                exponent = r.precision() - r.scale() - 1;
+            }
+            StringBuilder sb = new StringBuilder(sign).append(digits.charAt(0));
+            if (digitsAfterPoint > 0) {
+                sb.append('.');
+                for (int i = 1; i <= digitsAfterPoint; i++) {
+                    sb.append(i < digits.length() ? digits.charAt(i) : '0');
+                }
+            }
+            sb.append('e').append(exponent < 0 ? '-' : '+');
+            int abs = Math.abs(exponent);
+            if (abs < 10) {
+                sb.append('0');
+            }
+            return sb.append(abs).toString();
+        }
+
+        private void formatScientific(boolean upperCase) throws IOException {
+            int p = precision == -1 ? 6 : precision;
+            String str = isNonFinite() ? nonFinite(args[argumentIndex]) : scientific(decimalArg('e'), p, isNegativeZero());
+            precision = -1;
+            formatGivenString(upperCase, str);
+        }
+
+        private void formatGeneral(boolean upperCase) throws IOException {
+            int p = precision == -1 ? 6 : Math.max(precision, 1);
+            String str;
+            if (isNonFinite()) {
+                str = nonFinite(args[argumentIndex]);
+            } else {
+                BigDecimal v = decimalArg('g');
+                int exponent = 0;
+                if (v.signum() != 0) {
+                    BigDecimal r = roundSignificant(v.abs(), p);
+                    exponent = r.precision() - r.scale() - 1;
+                }
+                if (exponent >= -4 && exponent < p) {
+                    str = v.setScale(p - 1 - exponent, java.math.RoundingMode.HALF_UP).toPlainString();
+                    if (isNegativeZero()) {
+                        str = "-" + str;
+                    }
+                } else {
+                    str = scientific(v, p - 1, isNegativeZero());
+                }
+            }
+            precision = -1;
+            formatGivenString(upperCase, str);
         }
 
         private void formatFloat(char specifier, boolean upperCase) throws IOException {

@@ -66,6 +66,15 @@ public final class MinecraftCompat {
         return (net.minecraft.class_3797) net.minecraft.class_3797.field_25319;
     }
 
+    /**
+     * {@code NetworkEncryptionUtils.generateServerKeyPair()}: RSA is not available in the page. The integrated
+     * server only needs the key pair for online-mode logins over the network; the client's own connection is
+     * local and never encrypted, and "Open to LAN" is impossible in a browser.
+     */
+    public static java.security.KeyPair method_15237() {
+        return null;
+    }
+
     /** Util.startTimerHack: a Windows timer-resolution workaround (a thread sleeping forever). */
     public static void method_29476() {
     }

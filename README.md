@@ -171,11 +171,19 @@ the result is a new static `build/web` directory to serve.
 
 With [ViaFabric](https://modrinth.com/mod/viafabric) 0.4.x (it includes ViaVersion) in `./mods`, the
 1.16.5 client can join servers running older versions (1.8 – 1.16.4) — ViaVersion translates in the
-newer-client-to-older-server direction, so no ViaBackwards is needed. Pick the version with the **Via**
-button on the Multiplayer screen (it turns client-side translation on and sets the protocol), or open
-the page with `?protocol=1.12.2` (also `?protocol=auto` or a protocol number); `?protocol=1.16.5`
-connects natively. The in-game setting lives in the in-memory game directory, so it lasts until the
-page is reloaded; the URL switch is applied at every start.
+newer-client-to-older-server direction, so no ViaBackwards is needed. Pick the version with the **VIA**
+button at the top right of the Multiplayer screen: press *Enable client-side* and type the version
+(`1.12.2`, or a protocol number such as `340`) in the field. Or open the page with `?protocol=1.12.2`
+(also `?protocol=auto` or a protocol number); `?protocol=1.16.5` connects natively. The in-game setting
+lives in the in-memory game directory, so it lasts until the page is reloaded; the URL switch is applied
+at every start. Tested: joining a vanilla 1.12.2 server through the relay, world, movement and chat; F3
+shows `[ViaFabric] … C: 1.16.4-1.16.5 (754) S: 1.12.2 (340)`.
+
+ViaVersion needed a few browser accommodations (all in the platform layer, inactive without the mod):
+its JvmDowngrader stubs and `PipelineUtil` reflect on JDK / Netty internals and are redirected to
+direct implementations, its relocated Gson `TypeToken`s get build-time generic-supertype tables, and its
+update check is skipped. Its protocol auto-detection (`AUTO`) cannot open a second connection from the
+page, so pick the version explicitly.
 
 Page switches (debugging): `?log` (log overlay), `?username=Name`, `?threads` (Minecraft worker pools
 on green threads instead of inline), `?trace` (GL upload/draw trace), `?beacon` (log lines are sent to
