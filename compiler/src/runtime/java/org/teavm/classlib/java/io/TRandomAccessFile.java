@@ -68,9 +68,20 @@ public class TRandomAccessFile implements DataInput, DataOutput, Closeable {
             throw new FileNotFoundException();
         }
 
+        int existingSize = virtualFile.length();
         accessor = virtualFile.createAccessor(true, !readOnly, false);
         if (accessor == null) {
             throw new FileNotFoundException();
+        }
+        // TeaFabric patch: the in-memory file system truncates a file when a writable accessor is created
+        // (right for FileOutputStream); "rw" must keep the contents, as on the JDK. The bytes are still in
+        // the file's buffer, so restoring the size brings them back. Region files lost their chunks.
+        try {
+            if (!readOnly && accessor.size() < existingSize) {
+                accessor.resize(existingSize);
+            }
+        } catch (IOException e) {
+            throw new FileNotFoundException(e.getMessage());
         }
         buff = new byte[16];
     }
