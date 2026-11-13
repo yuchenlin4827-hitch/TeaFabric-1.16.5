@@ -22,7 +22,12 @@ final class GenericSupersGenerator implements Opcodes {
     static final String CLASS_NAME = "teafabric/generated/GenericSupers";
     private static final String GSON_TYPES = "com/google/gson/internal/$Gson$Types";
     private static final String TYPE = "java/lang/reflect/Type";
-    private static final String[] TOKEN_CLASSES = {"com/google/gson/reflect/TypeToken"};
+
+    /** Gson's TypeToken, also relocated copies shaded into mods (ViaVersion: com/viaversion/viaversion/libs/gson). */
+    public static boolean isTypeToken(String internalName) {
+        return internalName != null && (internalName.equals("com/google/gson/reflect/TypeToken")
+                || internalName.endsWith("/gson/reflect/TypeToken"));
+    }
 
     private final Map<String, byte[]> classes;
 
@@ -40,11 +45,7 @@ final class GenericSupersGenerator implements Opcodes {
         for (Map.Entry<String, byte[]> e : classes.entrySet()) {
             ClassReader reader = new ClassReader(e.getValue());
             String superName = reader.getSuperName();
-            boolean token = false;
-            for (String t : TOKEN_CLASSES) {
-                token |= t.equals(superName);
-            }
-            if (!token) {
+            if (!isTypeToken(superName)) {
                 continue;
             }
             String[] signature = new String[1];

@@ -17,6 +17,17 @@ public class TLinkedBlockingQueue<E> extends AbstractQueue<E> implements Blockin
         this(Integer.MAX_VALUE);
     }
 
+    /**
+     * A positive timeout below one millisecond still waits one: rounding it to 0 made Netty's event loop poll
+     * without ever yielding while a scheduled task was less than 1 ms away (green threads only switch on waits).
+     */
+    private static long waitMillis(long timeout, TimeUnit unit) {
+        if (timeout <= 0) {
+            return 0;
+        }
+        return Math.max(1, unit.toMillis(timeout));
+    }
+
     public TLinkedBlockingQueue(int capacity) {
         if (capacity <= 0) {
             throw new IllegalArgumentException();
@@ -56,7 +67,7 @@ public class TLinkedBlockingQueue<E> extends AbstractQueue<E> implements Blockin
 
     @Override
     public synchronized boolean offer(E e, long timeout, TimeUnit unit) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + unit.toMillis(timeout);
+        long deadline = System.currentTimeMillis() + waitMillis(timeout, unit);
         while (items.size() >= capacity) {
             long left = deadline - System.currentTimeMillis();
             if (left <= 0) {
@@ -81,7 +92,7 @@ public class TLinkedBlockingQueue<E> extends AbstractQueue<E> implements Blockin
 
     @Override
     public synchronized E poll(long timeout, TimeUnit unit) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + unit.toMillis(timeout);
+        long deadline = System.currentTimeMillis() + waitMillis(timeout, unit);
         while (items.isEmpty()) {
             long left = deadline - System.currentTimeMillis();
             if (left <= 0) {

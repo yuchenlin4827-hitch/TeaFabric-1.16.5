@@ -36,7 +36,7 @@ public final class GenerateTables {
                     try (InputStream in = jar.getInputStream(e)) {
                         byte[] bytes = in.readAllBytes();
                         String sup = new ClassReader(bytes).getSuperName();
-                        if ("com/google/gson/reflect/TypeToken".equals(sup)) {
+                        if (GenericSupersGenerator.isTypeToken(sup)) {
                             tokens.putIfAbsent(new ClassReader(bytes).getClassName(), bytes);
                         }
                     }

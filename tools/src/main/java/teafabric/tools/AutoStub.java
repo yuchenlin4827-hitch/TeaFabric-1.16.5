@@ -231,6 +231,9 @@ public final class AutoStub implements Opcodes {
     }
 
     private boolean exists(String internal) {
+        if (internal.startsWith("java/time/")) {
+            return true; // TeaVM compiles the JDK's own java.time (see request())
+        }
         if (internal.startsWith("java/")) {
             return present.contains(substituteName(internal));
         }
@@ -335,6 +338,11 @@ public final class AutoStub implements Opcodes {
     }
 
     private void request(String[] r) {
+        if (r.length > 1 && r[1].startsWith("java.time.")) {
+            // TeaVM compiles the JDK's own java.time (pure Java) when its class library has none; a stub
+            // would shadow that working implementation (ChronoUnit's initialiser calls Duration.ofNanos).
+            return;
+        }
         switch (r[0]) {
             case "class": {
                 String internal = r[1].replace('.', '/');
