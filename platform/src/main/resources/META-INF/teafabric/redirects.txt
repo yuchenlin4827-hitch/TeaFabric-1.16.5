@@ -117,3 +117,8 @@ net.minecraft.class_156$class_158 method_669  (Ljava/net/URL;)V                 
 net.minecraft.class_156$class_158 method_673  (Ljava/net/URI;)V                             -> teafabric.web.compat.DesktopCompat
 net.minecraft.class_156$class_158 method_670  (Ljava/lang/String;)V                         -> teafabric.web.compat.DesktopCompat
 java.nio.file.FileSystem  newWatchService       ()Ljava/nio/file/WatchService;               -> teafabric.web.compat.IoCompat
+# Languages: translations fetched on demand, and a language change reloads only the translations.
+net.minecraft.class_2477 method_29425         (Ljava/io/InputStream;Ljava/util/function/BiConsumer;)V -> teafabric.web.compat.LanguageCompat
+net.minecraft.class_310  method_1521          ()Ljava/util/concurrent/CompletableFuture;   -> teafabric.web.compat.LanguageCompat
+# Title screen without Realms.
+net.minecraft.class_437  method_25423         (Lnet/minecraft/class_310;II)V                -> teafabric.web.compat.ScreenCompat

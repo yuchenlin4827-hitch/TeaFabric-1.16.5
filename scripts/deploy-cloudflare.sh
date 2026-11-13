@@ -22,8 +22,9 @@ mkdir -p "$OUT/dist"
 # The page, the runtime, the data archives; not the test pages (build/web/mini*).
 cp build/web/index.html build/web/boot.js build/web/style.css "$OUT/dist/"
 cp -r build/web/data "$OUT/dist/"
-# Sounds, fetched by the page when first played (sounds/<hash>.ogg).
+# Sounds and translations, fetched by the page when first needed (sounds/<hash>.ogg, lang/<hash>.json).
 [ -d build/web/sounds ] && cp -r build/web/sounds "$OUT/dist/"
+[ -d build/web/lang ] && cp -r build/web/lang "$OUT/dist/"
 mkdir -p "$OUT/dist/teavm"
 for f in build/web/teavm/*; do
   [ "$(basename "$f")" = classes.wasm ] || cp "$f" "$OUT/dist/teavm/"

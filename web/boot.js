@@ -366,6 +366,27 @@
     }
   };
 
+  // Other assets fetched on demand (teafabric.web.vfs.WebAssets), e.g. lang/<hash>.json.
+  const fetchedAssets = new Map();
+  tf.fetchAsset = function (id, url) {
+    fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.arrayBuffer();
+    }).then(function (buf) {
+      fetchedAssets.set(id, new Int8Array(buf));
+      wasmExports.teafabricAssetFetched(id, 1);
+    }, function (e) {
+      console.warn('[assets] ' + url + ': ' + (e && e.message ? e.message : e));
+      wasmExports.teafabricAssetFetched(id, 0);
+    });
+    return true;
+  };
+  tf.takeAsset = function (id) {
+    const data = fetchedAssets.get(id);
+    fetchedAssets.delete(id);
+    return data || null;
+  };
+
   // ------------------------------------------------------------------ files, fullscreen, exit
 
   canvas.addEventListener('dragover', function (e) { e.preventDefault(); });

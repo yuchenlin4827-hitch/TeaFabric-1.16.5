@@ -24,6 +24,8 @@ mkdir -p "$STAGE/web/teavm"
 cp build/web/index.html build/web/boot.js build/web/style.css "$STAGE/web/"
 cp -r build/web/data "$STAGE/web/"
 cp build/web/teavm/* "$STAGE/web/teavm/"
+# Every language (47 MB, about 12 MB zipped); the page loads the chosen one.
+[ -d build/web/lang ] && cp -r build/web/lang "$STAGE/web/"
 # Sound effects (default), or all sounds, from build/web/sounds; the page fetches them when played.
 sounds=${SOUNDS:-effects}
 if [ "$sounds" != none ] && [ -d build/web/sounds ]; then
