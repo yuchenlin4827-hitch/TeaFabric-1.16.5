@@ -409,8 +409,10 @@ public class GLFW {
         }
         long names = NativeMemory.malloc(8L * count);
         long[] strings = new long[count];
+        java.util.List<String> dropped = new java.util.ArrayList<>();
         for (int i = 0; i < count; i++) {
             String path = teafabric.web.vfs.WebFileSystem.GAME_DIR + "/dropped/" + WebWindow.dropName(i);
+            dropped.add(path);
             try {
                 teafabric.web.vfs.WebFileSystem.writeFile(path, WebWindow.dropData(i).copyToJavaArray());
             } catch (java.io.IOException e) {
@@ -423,10 +425,6 @@ public class GLFW {
             NativeMemory.putLong(names + 8L * i, strings[i]);
         }
         WebWindow.clearDrops();
-        java.util.List<String> dropped = new java.util.ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            dropped.add(teafabric.web.vfs.WebFileSystem.GAME_DIR + "/dropped/" + WebWindow.dropName(i));
-        }
         if (teafabric.web.compat.DesktopCompat.importDropped(dropped)) {
             for (long s : strings) {
                 NativeMemory.free(s);
