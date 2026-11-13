@@ -116,3 +116,4 @@ net.minecraft.class_156$class_158 method_672  (Ljava/io/File;)V                 
 net.minecraft.class_156$class_158 method_669  (Ljava/net/URL;)V                             -> teafabric.web.compat.DesktopCompat
 net.minecraft.class_156$class_158 method_673  (Ljava/net/URI;)V                             -> teafabric.web.compat.DesktopCompat
 net.minecraft.class_156$class_158 method_670  (Ljava/lang/String;)V                         -> teafabric.web.compat.DesktopCompat
+java.nio.file.FileSystem  newWatchService       ()Ljava/nio/file/WatchService;               -> teafabric.web.compat.IoCompat
