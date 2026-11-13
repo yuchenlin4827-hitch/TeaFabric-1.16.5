@@ -200,8 +200,11 @@ reachable through the class path (`getResourceAsStream`) as on a JVM.
 
 What does work without a rebuild:
 
-* **Resource packs**: drag the pack `.zip` onto the page while the Resource Packs screen is open.
-* **Data packs**: drag them onto Create World → Data Packs (singleplayer), or install them on a server.
+* **Resource packs**: drag the pack `.zip` onto the page while the Resource Packs screen is open,
+  confirm, select it, Done (tested: a pack's language file renamed the title screen buttons). Packs are
+  kept in browser storage like worlds.
+* **Data packs**: drag them onto Create World → Data Packs (singleplayer; the same screen as resource
+  packs, not tested separately), or install them on a server.
 * **Server-side mods and plugins** of the server you connect to (anything that needs no client code).
 
 Rebuilding after adding jars to `./mods` takes about 15–25 minutes (bake + TeaVM + packaging), and

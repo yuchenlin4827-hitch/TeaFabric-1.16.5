@@ -36,6 +36,16 @@ public final class IoCompat {
         return FileChannel.open(path, options);
     }
 
+    /**
+     * {@code FileSystem.newWatchService()}: no file watching in the page. Minecraft's pack screens (resource
+     * packs, data packs) treat an IOException as "no folder monitoring" and carry on; the throwing stub made
+     * opening them crash the game.
+     */
+    public static java.nio.file.WatchService newWatchService(java.nio.file.FileSystem fileSystem)
+            throws java.io.IOException {
+        throw new java.io.IOException("File watching is not available in the browser");
+    }
+
     public static Path toPath(File file) {
         return Paths.get(file.getPath());
     }
