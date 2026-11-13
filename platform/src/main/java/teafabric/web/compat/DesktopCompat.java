@@ -44,7 +44,11 @@ public final class DesktopCompat {
 
     public static void method_669(class_156.class_158 os, URL url) {
         if ("file".equals(url.getProtocol())) {
-            open(new File(url.getPath()));
+            try {
+                open(new File(java.net.URLDecoder.decode(url.getPath(), "UTF-8")));
+            } catch (java.io.UnsupportedEncodingException e) {
+                open(new File(url.getPath()));
+            }
         } else {
             openLink(url.toString());
         }
@@ -66,7 +70,17 @@ public final class DesktopCompat {
         }
     }
 
+    /** Minecraft passes e.g. {@code saves/New World/.}: drop "." segments and trailing separators. */
+    private static File normalize(File file) {
+        String path = file.getPath().replace('\\', '/');
+        while (path.endsWith("/.") || (path.endsWith("/") && path.length() > 1)) {
+            path = path.substring(0, path.length() - (path.endsWith("/.") ? 2 : 1));
+        }
+        return new File(path.replace("/./", "/"));
+    }
+
     private static void open(File file) {
+        file = normalize(file);
         try {
             if (file.isDirectory()) {
                 File[] children = file.listFiles();
