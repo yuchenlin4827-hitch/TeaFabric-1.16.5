@@ -53,6 +53,30 @@ public final class LangCompat {
 
     // ---- Class
 
+    /**
+     * {@code Array.newInstance(componentType, dimensions...)}: TeaVM only has the one-dimensional form.
+     * Minecraft's BlockPatternBuilder makes {@code Predicate[][][]} with it (the End portal pattern of every
+     * new world's dragon fight).
+     */
+    public static Object newInstance(Class<?> componentType, int... dimensions) {
+        if (dimensions.length == 0) {
+            throw new IllegalArgumentException("Empty dimensions array");
+        }
+        Class<?> elementType = componentType;
+        for (int i = 1; i < dimensions.length; i++) {
+            elementType = java.lang.reflect.Array.newInstance(elementType, 0).getClass();
+        }
+        Object array = java.lang.reflect.Array.newInstance(elementType, dimensions[0]);
+        if (dimensions.length > 1) {
+            int[] rest = java.util.Arrays.copyOfRange(dimensions, 1, dimensions.length);
+            Object[] elements = (Object[]) array;
+            for (int i = 0; i < elements.length; i++) {
+                elements[i] = newInstance(componentType, rest);
+            }
+        }
+        return array;
+    }
+
     /** Redirect targets that drop a call (see redirects.txt). */
     public static void ignore(Object receiver) {
     }
