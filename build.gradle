@@ -211,9 +211,56 @@ tasks.register('webClasspathZip', Zip) {
     destinationDirectory = new File(webOut, 'data')
 }
 
+// Sounds are not in assets.zip: each .ogg object there is a placeholder naming its hash, so Minecraft
+// registers every sound, and the browser fetches the real file from sounds/<hash>.ogg when it is first
+// played (platform: teafabric.web.audio.WebSound and the replacement net.minecraft.class_4228).
+def soundPlaceholders = file('build/sound-placeholders')
+
+def soundObjects = { // hash -> file, for every .ogg object present locally
+    def indexFile = setupValue('minecraft.assetIndex')
+    def assetsDir = setupValue('minecraft.assetsDir')
+    def result = [:]
+    if (indexFile != null) {
+        new groovy.json.JsonSlurper().parse(new File(indexFile)).objects.each { name, obj ->
+            if (name.endsWith('.ogg')) {
+                def f = new File(assetsDir, "objects/${obj.hash.substring(0, 2)}/${obj.hash}")
+                if (f.exists()) {
+                    result[obj.hash] = f
+                }
+            }
+        }
+    }
+    return result
+}
+
+tasks.register('webSoundPlaceholders') {
+    group = 'teafabric'
+    description = 'Placeholder .ogg objects for assets.zip (the real files are fetched on demand).'
+    def indexFile = setupValue('minecraft.assetIndex')
+    if (indexFile != null) {
+        inputs.file(indexFile)
+    }
+    outputs.dir(soundPlaceholders)
+    doLast {
+        project.delete(soundPlaceholders)
+        if (indexFile == null) {
+            return
+        }
+        new groovy.json.JsonSlurper().parse(new File(indexFile)).objects.each { name, obj ->
+            if (name.endsWith('.ogg')) {
+                def f = new File(soundPlaceholders, "objects/${obj.hash.substring(0, 2)}/${obj.hash}")
+                f.parentFile.mkdirs()
+                f.text = "TEAFABRIC-SOUND\n${obj.hash}\n"
+            }
+        }
+    }
+}
+
 tasks.register('webAssetsZip', Zip) {
     group = 'teafabric'
-    description = 'Asset index and non-sound objects (sounds are loaded on demand).'
+    description = 'Asset index, non-sound objects and sound placeholders.'
+    dependsOn 'webSoundPlaceholders'
+    from(soundPlaceholders)
     entryCompression = ZipEntryCompression.STORED
     archiveFileName = 'assets.zip'
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -258,6 +305,11 @@ tasks.register('packageWeb', Copy) {
     from({ zipTree(project(':compiler').configurations.runtimeClasspath.files.find { it.name.startsWith('teavm-core') }) }) {
         include 'org/teavm/backend/wasm/wasm-gc-runtime.js'
         eachFile { it.path = 'teavm/classes.wasm-runtime.js' }
+        includeEmptyDirs = false
+    }
+    // The sounds themselves, fetched on demand by the page: sounds/<hash>.ogg
+    from({ soundObjects().values() }) {
+        eachFile { it.path = "sounds/${it.name}.ogg" }
         includeEmptyDirs = false
     }
     into webOut

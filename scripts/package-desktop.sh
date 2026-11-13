@@ -5,6 +5,7 @@
 #
 #   scripts/package-desktop.sh
 #   SERVER=wss://relay.example.com/ scripts/package-desktop.sh   # server address in the usage guide
+#   SOUNDS=all scripts/package-desktop.sh    # with music and music discs (+176 MB); SOUNDS=none: silent
 #
 # The zip contains Minecraft's code and assets: do not publish it (scripts/deploy-cloudflare.sh serves it
 # behind the site password).
@@ -23,6 +24,27 @@ mkdir -p "$STAGE/web/teavm"
 cp build/web/index.html build/web/boot.js build/web/style.css "$STAGE/web/"
 cp -r build/web/data "$STAGE/web/"
 cp build/web/teavm/* "$STAGE/web/teavm/"
+# Sound effects (default), or all sounds, from build/web/sounds; the page fetches them when played.
+sounds=${SOUNDS:-effects}
+if [ "$sounds" != none ] && [ -d build/web/sounds ]; then
+  mkdir -p "$STAGE/web/sounds"
+  index=$(grep '^minecraft.assetIndex=' .cache/setup.properties | cut -d= -f2-)
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const [index, from, to, mode] = process.argv.slice(1);
+    let n = 0;
+    for (const [name, o] of Object.entries(JSON.parse(fs.readFileSync(index, "utf8")).objects)) {
+      if (!name.endsWith(".ogg")) continue;
+      if (mode !== "all" && /^minecraft\/sounds\/(music|records)\//.test(name)) continue;
+      const file = o.hash + ".ogg";
+      if (fs.existsSync(path.join(from, file)) && !fs.existsSync(path.join(to, file))) {
+        fs.copyFileSync(path.join(from, file), path.join(to, file));
+        n++;
+      }
+    }
+    console.log(n + " sound files (" + mode + ")");
+  ' "$index" build/web/sounds "$STAGE/web/sounds" "$sounds"
+fi
 
 build() { # GOOS GOARCH output
   (cd launcher && CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w" -o "$STAGE/$3" .)
@@ -58,6 +80,9 @@ TeaFabric 1.16.5（下載版）
 世界和設定存在瀏覽器裡，跟網站版的存檔分開。
 要搬世界：在一邊的世界選單按「編輯」→「打開世界資料夾」會下載成 zip，
 再把 zip 拖到另一邊的「選擇世界」畫面。
+
+音效
+已附帶音效。背景音樂和唱片不在下載版裡（太大），只有網站版有。
 
 多人遊戲
 $server_line

@@ -303,6 +303,69 @@
     }
   };
 
+  // ------------------------------------------------------------------ sounds
+
+  // Ogg Vorbis decoding for teafabric.web.audio.WebSound. Vanilla sounds are fetched from
+  // sounds/<hash>.ogg when first played; resource-pack sounds arrive as bytes. The decoded AudioBuffer
+  // stays here until Java releases it; Java reads it as 16-bit PCM through copy().
+  const decoded = new Map();
+  let decodeContext = null;
+  function decoderContext() {
+    if (tf.audio) return tf.audio; // decode at the playback rate when the sound engine is up
+    if (!decodeContext) {
+      const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      decodeContext = new Offline(2, 1, 48000);
+    }
+    return decodeContext;
+  }
+  tf.sound = {
+    stats: { loaded: 0, failed: 0 },
+    load: function (id, hash, data) {
+      let ctx;
+      try {
+        ctx = decoderContext();
+      } catch (e) {
+        return false; // no WebAudio (?noaudio)
+      }
+      const bytes = hash
+        ? fetch('sounds/' + hash + '.ogg').then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.arrayBuffer();
+          })
+        : Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+      bytes.then(function (buf) {
+        return new Promise(function (resolve, reject) { ctx.decodeAudioData(buf, resolve, reject); });
+      }).then(function (audio) {
+        decoded.set(id, audio);
+        tf.sound.stats.loaded++;
+        wasmExports.teafabricSoundLoaded(id, 1);
+      }, function (e) {
+        console.warn('[sound] ' + (hash ? 'sounds/' + hash + '.ogg' : 'Ogg data') + ': ' + (e && e.message ? e.message : e));
+        tf.sound.stats.failed++;
+        wasmExports.teafabricSoundLoaded(id, 0);
+      });
+      return true;
+    },
+    get: function (id) {
+      return decoded.get(id);
+    },
+    copy: function (id, start, count, mem, ptr) {
+      const audio = decoded.get(id);
+      const channels = audio.numberOfChannels;
+      const out = new Int16Array(mem, ptr, count * channels);
+      for (let c = 0; c < channels; c++) {
+        const src = audio.getChannelData(c);
+        for (let i = 0, j = c; i < count; i++, j += channels) {
+          const v = src[start + i];
+          out[j] = v >= 1 ? 32767 : v <= -1 ? -32768 : (v * 32767) | 0;
+        }
+      }
+    },
+    release: function (id) {
+      decoded.delete(id);
+    }
+  };
+
   // ------------------------------------------------------------------ files, fullscreen, exit
 
   canvas.addEventListener('dragover', function (e) { e.preventDefault(); });
