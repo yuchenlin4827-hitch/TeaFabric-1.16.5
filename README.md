@@ -141,6 +141,30 @@ The relay has no dependencies (Node.js 16+); `node proxy/ws-proxy.js --help` lis
 (`online-mode=false`, or a proxy such as Velocity/Bungee handling authentication): a browser cannot
 log in to Microsoft accounts or reach Mojang's session servers.
 
+## Singleplayer
+
+Singleplayer runs Minecraft's own integrated server inside the page, on green threads next to the
+client: Singleplayer → Create New World works as usual. Generating the spawn area (441 chunks) takes
+about 2½ minutes in headless Chromium with software rendering; the loading screen keeps updating
+meanwhile. What makes it work:
+
+* the client and the integrated server talk over a pair of in-memory Netty channels (Netty's local
+  transport needs event-loop threads), pumped once per frame;
+* worker tasks submitted by the server (world generation, region-file I/O) run on a worker green thread
+  that yields after every task, and the server's task loop yields too, so the page never freezes;
+* fixes for TeaVM's in-memory file system and class library that saving needs: files opened `"rw"`
+  are no longer truncated, `FileChannel.open(CREATE)` creates files, direct buffers are zeroed,
+  `Deflater` accepts `Z_BUF_ERROR`, `Files.newByteChannel`, multi-dimensional `Array.newInstance`;
+* the server's RSA key pair is skipped (only online-mode logins over the network use it).
+
+Tested: create a world, spawn, walk, F3 (`Integrated server @ … ms ticks`), pause menu, world icon
+saved. Measured in headless Chromium with SwiftShader (software WebGL, 4 cores): spawn area ≈160 s,
+about 6 fps while playing, server ticks ≈200 ms instead of 50 ms (the client and the server share one
+browser thread). A real GPU helps the frame rate; the server stays several times slower than on a JVM.
+
+Limits: the game directory, worlds included, lives in memory, so worlds are gone when the page is
+reloaded (saving to IndexedDB is not implemented yet); "Open to LAN" is impossible in a browser.
+
 ## Mods
 
 Fabric mods (jars for Minecraft 1.16.5) go into `./mods`; run `scripts/build-web.sh` again. Mods
@@ -227,7 +251,7 @@ Not working yet / known issues:
   `--wasm-tier-up-filter`, fixed by the function splitters above. Strict mode stays enabled because
   null dereferences relying on engine traps crash Chromium (reproduced with a 10-line TeaVM program).
 * Sounds: Ogg Vorbis decoding is not wired up yet (`.ogg` assets are not packaged).
-* No world persistence (IndexedDB) yet; integrated server / single-player untested.
+* No world persistence (IndexedDB) yet: singleplayer worlds and settings are lost on reload.
 * Multiplayer needs a WebSocket ↔ TCP proxy (browsers cannot open TCP sockets); online-mode
   authentication is not available.
 * Performance work (optimisation level, uniform caching, streaming buffers) has not started.
