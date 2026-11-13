@@ -143,17 +143,55 @@ public final class AutoStub implements Opcodes {
         }
     }
 
+    /** Methods declared on the program class path: owner.name+descriptor, JDK names mapped to TeaVM's. */
+    private final Set<String> declared = new HashSet<>();
+
+    private static String normalizeDescriptor(String desc) {
+        StringBuilder sb = new StringBuilder();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("L([^;]+);").matcher(desc);
+        int last = 0;
+        while (m.find()) {
+            sb.append(desc, last, m.start()).append('L').append(substituteName(m.group(1))).append(';');
+            last = m.end();
+        }
+        return sb.append(desc.substring(last)).toString();
+    }
+
+    /** True when the class library (or a patch of it) now declares the method a stale request asked for. */
+    private boolean declares(String owner, String name, String desc) {
+        return declared.contains(substituteName(owner) + "." + name + normalizeDescriptor(desc));
+    }
+
     private void indexClass(byte[] bytes) {
         ClassReader reader = new ClassReader(bytes);
-        present.add(reader.getClassName());
+        String className = reader.getClassName();
+        present.add(className);
         reader.accept(new ClassVisitor(ASM9) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
                     String[] exceptions) {
+                declared.add(className + "." + name + normalizeDescriptor(descriptor));
                 return new MethodVisitor(ASM9) {
                     @Override
                     public void visitMethodInsn(int opcode, String owner, String mname, String mdesc, boolean itf) {
                         invokeOpcode.putIfAbsent(owner + "." + mname + mdesc, opcode);
+                    }
+
+                    @Override
+                    public void visitInvokeDynamicInsn(String iname, String idesc, org.objectweb.asm.Handle bsm,
+                            Object... bsmArgs) {
+                        // Method references (Duration::ofNanos) reach their target through a handle.
+                        for (Object arg : bsmArgs) {
+                            if (arg instanceof org.objectweb.asm.Handle) {
+                                org.objectweb.asm.Handle h = (org.objectweb.asm.Handle) arg;
+                                int opcode = h.getTag() == org.objectweb.asm.Opcodes.H_INVOKESTATIC ? INVOKESTATIC
+                                        : h.getTag() == org.objectweb.asm.Opcodes.H_INVOKEINTERFACE ? INVOKEINTERFACE
+                                        : h.getTag() == org.objectweb.asm.Opcodes.H_NEWINVOKESPECIAL
+                                                || h.getTag() == org.objectweb.asm.Opcodes.H_INVOKESPECIAL
+                                                ? INVOKESPECIAL : INVOKEVIRTUAL;
+                                invokeOpcode.putIfAbsent(h.getOwner() + "." + h.getName() + h.getDesc(), opcode);
+                            }
+                        }
                     }
 
                     @Override
@@ -193,6 +231,9 @@ public final class AutoStub implements Opcodes {
     }
 
     private boolean exists(String internal) {
+        if (internal.startsWith("java/time/")) {
+            return true; // TeaVM compiles the JDK's own java.time (see request())
+        }
         if (internal.startsWith("java/")) {
             return present.contains(substituteName(internal));
         }
@@ -229,6 +270,27 @@ public final class AutoStub implements Opcodes {
                     s.interfaces.add(in);
                 }
             }
+            if (!c.isInterface() && (c.getClassLoader() == null
+                    || c.getClassLoader() == ClassLoader.getPlatformClassLoader())) {
+                // A JDK class: stub its whole public API now. Otherwise every compile only reveals the next
+                // missing member (a pass is ~13 minutes for the full game).
+                try {
+                    for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
+                        if (!m.isSynthetic() && (Modifier.isPublic(m.getModifiers())
+                                || Modifier.isProtected(m.getModifiers()))) {
+                            s.methods.putIfAbsent(m.getName() + Type.getMethodDescriptor(m),
+                                    Modifier.isStatic(m.getModifiers()));
+                        }
+                    }
+                    for (java.lang.reflect.Constructor<?> k : c.getDeclaredConstructors()) {
+                        if (Modifier.isPublic(k.getModifiers()) || Modifier.isProtected(k.getModifiers())) {
+                            s.methods.putIfAbsent("<init>" + Type.getConstructorDescriptor(k), false);
+                        }
+                    }
+                } catch (LinkageError e) {
+                    // members referencing classes this JDK lacks: keep the requested ones only
+                }
+            }
         }
         return s;
     }
@@ -257,7 +319,30 @@ public final class AutoStub implements Opcodes {
         return false;
     }
 
+    /** No call site seen: ask the JDK running this tool whether the (JDK) method is static. */
+    private boolean hostSaysStatic(String owner, String name, String desc) {
+        try {
+            Class<?> cls = hostClass(owner);
+            if (cls == null) {
+                return false;
+            }
+            for (java.lang.reflect.Method m : cls.getDeclaredMethods()) {
+                if (m.getName().equals(name) && org.objectweb.asm.Type.getMethodDescriptor(m).equals(desc)) {
+                    return java.lang.reflect.Modifier.isStatic(m.getModifiers());
+                }
+            }
+        } catch (LinkageError e) {
+            // unresolvable members
+        }
+        return false;
+    }
+
     private void request(String[] r) {
+        if (r.length > 1 && r[1].startsWith("java.time.")) {
+            // TeaVM compiles the JDK's own java.time (pure Java) when its class library has none; a stub
+            // would shadow that working implementation (ChronoUnit's initialiser calls Duration.ofNanos).
+            return;
+        }
         switch (r[0]) {
             case "class": {
                 String internal = r[1].replace('.', '/');
@@ -270,8 +355,11 @@ public final class AutoStub implements Opcodes {
                 String owner = r[1].replace('.', '/');
                 String name = r[2];
                 String desc = r[3];
+                if (exists(owner) && declares(owner, name, desc)) {
+                    break; // implemented since it was requested (e.g. a class-library patch)
+                }
                 Integer op = invokeOpcode.get(owner + "." + name + desc);
-                boolean isStatic = op != null && op == INVOKESTATIC;
+                boolean isStatic = op != null ? op == INVOKESTATIC : hostSaysStatic(owner, name, desc);
                 if (!exists(owner) || stubs.containsKey(owner)) {
                     stub(owner).methods.put(name + desc, isStatic);
                 } else {

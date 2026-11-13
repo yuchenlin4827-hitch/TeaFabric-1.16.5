@@ -30,6 +30,10 @@ public class TeaFabricReflection implements ReflectionSupplier {
 
     @Override
     public Collection<MethodDescriptor> getAccessibleMethods(ReflectionContext context, String className) {
+        if (className.equals("io.netty.channel.ChannelInitializer")) {
+            // Protocol translators (ViaVersion's ViaChannelInitializer) look it up in a static initialiser.
+            return Collections.singletonList(MethodDescriptor.parse("initChannel(Lio/netty/channel/Channel;)V"));
+        }
         if (!className.startsWith("net.minecraft.") || className.indexOf('$') < 0) {
             return Collections.emptyList();
         }

@@ -53,6 +53,68 @@ public final class LangCompat {
 
     // ---- Class
 
+    /**
+     * {@code Array.newInstance(componentType, dimensions...)}: TeaVM only has the one-dimensional form.
+     * Minecraft's BlockPatternBuilder makes {@code Predicate[][][]} with it (the End portal pattern of every
+     * new world's dragon fight).
+     */
+    public static Object newInstance(Class<?> componentType, int... dimensions) {
+        if (dimensions.length == 0) {
+            throw new IllegalArgumentException("Empty dimensions array");
+        }
+        Class<?> elementType = componentType;
+        for (int i = 1; i < dimensions.length; i++) {
+            elementType = java.lang.reflect.Array.newInstance(elementType, 0).getClass();
+        }
+        Object array = java.lang.reflect.Array.newInstance(elementType, dimensions[0]);
+        if (dimensions.length > 1) {
+            int[] rest = java.util.Arrays.copyOfRange(dimensions, 1, dimensions.length);
+            Object[] elements = (Object[]) array;
+            for (int i = 0; i < elements.length; i++) {
+                elements[i] = newInstance(componentType, rest);
+            }
+        }
+        return array;
+    }
+
+    /** Redirect targets that drop a call (see redirects.txt). */
+    public static void ignore(Object receiver) {
+    }
+
+    public static void ignore() {
+    }
+
+    // ---- Java 9-16 APIs as called by mods downgraded to Java 8 with JvmDowngrader ("jvmdg" stubs). Their
+    // own stubs find the real methods through JDK internals (Class.forName("java.util.stream.ReferencePipeline")),
+    // which do not exist here; see redirects.txt.
+
+    public static <T> T[] toArray(java.util.Collection<T> collection, java.util.function.IntFunction<T[]> generator) {
+        return collection.toArray(generator.apply(0));
+    }
+
+    public static boolean isEmpty(java.util.Optional<?> optional) {
+        return !optional.isPresent();
+    }
+
+    public static <T> java.util.List<T> toList(java.util.stream.Stream<T> stream) {
+        java.util.List<T> list = new java.util.ArrayList<>();
+        stream.forEachOrdered(list::add);
+        return java.util.Collections.unmodifiableList(list);
+    }
+
+    /** {@code Runtime.version()}: no version object; {@link #runtimeFeatureVersion} answers for it. */
+    public static Object runtimeVersion() {
+        return null;
+    }
+
+    /**
+     * {@code Runtime.version().feature()}: 8, the level TeaVM's class library resembles most, so libraries pick
+     * their portable code paths (e.g. ViaVersion's own CRC32C instead of java.util.zip.CRC32C).
+     */
+    public static int runtimeFeatureVersion(Object version) {
+        return 8;
+    }
+
     public static URL getResource(Class<?> cls, String name) {
         return WebResources.getResource(cls, name);
     }
@@ -147,5 +209,9 @@ public final class LangCompat {
     /** Assertions are disabled, as on a JVM without -ea (ICU4J's asserts fail on our buffers otherwise). */
     public static boolean desiredAssertionStatus(Class<?> cls) {
         return false;
+    }
+
+    /** {@code Thread.setContextClassLoader}: there are no class loaders; accepted and ignored. */
+    public static void setContextClassLoader(Thread thread, ClassLoader loader) {
     }
 }

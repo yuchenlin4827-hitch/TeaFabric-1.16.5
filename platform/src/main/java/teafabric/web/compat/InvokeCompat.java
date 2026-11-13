@@ -60,4 +60,13 @@ public final class InvokeCompat {
     public static void invoke(MethodHandle h, long arg) {
         throw new UnsupportedOperationException("MethodHandle.invoke");
     }
+
+    /**
+     * ViaVersion's {@code PipelineUtil.privateHandleUnchecked}: looks codec methods up with getDeclaredMethod in
+     * its static initialiser, which fails without reflection; the methods using the handles are redirected to
+     * {@code io.netty.handler.codec.TeaFabricCodecs} instead.
+     */
+    public static MethodHandle privateHandleUnchecked(Class<?> owner, String name, Class<?>... parameterTypes) {
+        return null;
+    }
 }

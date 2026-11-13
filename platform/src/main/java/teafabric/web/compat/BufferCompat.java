@@ -27,11 +27,27 @@ public final class BufferCompat {
             LogSink.log(2, "WARN", "BufferCompat", "allocateDirect total " + (total >> 20) + " MiB", new Throwable("allocation site"));
         }
         try {
-            return ByteBuffer.allocateDirect(capacity);
+            return zeroed(ByteBuffer.allocateDirect(capacity));
         } catch (OutOfMemoryError e) {
             LogSink.log(3, "ERROR", "BufferCompat", "allocateDirect(" + capacity + ") failed after " + (total >> 20)
                     + " MiB in total", e);
             throw e;
         }
+    }
+
+    private static final byte[] ZEROS = new byte[65536];
+
+    /**
+     * TeaVM takes direct buffers from its linear-memory heap without clearing reused memory; the JDK hands
+     * out zeroed buffers and code relies on it (a new region file's header buffer showed old chunk offsets).
+     */
+    private static ByteBuffer zeroed(ByteBuffer buf) {
+        int capacity = buf.capacity();
+        for (int i = 0; i < capacity; i += ZEROS.length) {
+            buf.position(i);
+            buf.put(ZEROS, 0, Math.min(ZEROS.length, capacity - i));
+        }
+        buf.clear();
+        return buf;
     }
 }

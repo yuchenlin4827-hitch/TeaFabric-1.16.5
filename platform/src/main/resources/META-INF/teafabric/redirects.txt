@@ -42,6 +42,7 @@ java.lang.Thread         start                ()V                               
 java.nio.file.Paths      get                  (Ljava/net/URI;)Ljava/nio/file/Path;         -> teafabric.web.compat.UrlCompat
 java.nio.file.Path       of                   (Ljava/net/URI;)Ljava/nio/file/Path;         -> teafabric.web.compat.UrlCompat
 com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService createMinecraftSessionService ()Lcom/mojang/authlib/minecraft/MinecraftSessionService; -> teafabric.web.compat.OfflineSessionService
+com.mojang.authlib.AuthenticationService createMinecraftSessionService ()Lcom/mojang/authlib/minecraft/MinecraftSessionService; -> teafabric.web.compat.OfflineSessionService
 com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService createSocialInteractionsService (Ljava/lang/String;)Lcom/mojang/authlib/yggdrasil/YggdrasilSocialInteractionsService; -> teafabric.web.compat.OfflineSessionService
 java.lang.invoke.MethodType methodType        (Ljava/lang/Class;)Ljava/lang/invoke/MethodType; -> teafabric.web.compat.InvokeCompat
 java.lang.invoke.MethodType methodType        (Ljava/lang/Class;Ljava/lang/Class;)Ljava/lang/invoke/MethodType; -> teafabric.web.compat.InvokeCompat
@@ -63,3 +64,55 @@ net.minecraft.class_148   <init>               (Lnet/minecraft/class_128;)V     
 java.nio.ByteBuffer       allocateDirect       (I)Ljava/nio/ByteBuffer;                     -> teafabric.web.compat.BufferCompat
 # Assertions off, like a JVM without -ea
 java.lang.Class           desiredAssertionStatus ()Z                                        -> teafabric.web.compat.LangCompat
+# Multiplayer over WebSockets (see NetCompat)
+io.netty.bootstrap.Bootstrap connect           (Ljava/net/InetAddress;I)Lio/netty/channel/ChannelFuture; -> teafabric.web.compat.NetCompat
+io.netty.bootstrap.Bootstrap connect           (Ljava/lang/String;I)Lio/netty/channel/ChannelFuture; -> teafabric.web.compat.NetCompat
+io.netty.bootstrap.Bootstrap connect           (Ljava/net/SocketAddress;)Lio/netty/channel/ChannelFuture; -> teafabric.web.compat.NetCompat
+net.minecraft.class_639   method_2950          (Ljava/lang/String;)Lnet/minecraft/class_639; -> teafabric.web.compat.NetCompat
+net.minecraft.class_644   method_3001          (Lnet/minecraft/class_642;)V                 -> teafabric.web.compat.NetCompat
+net.minecraft.class_2889  <init>               (Ljava/lang/String;ILnet/minecraft/class_2539;)V -> teafabric.web.compat.NetCompat
+java.net.IDN              toASCII              (Ljava/lang/String;)Ljava/lang/String;       -> teafabric.web.compat.NetCompat
+# Text fields keep their initial focus (any receiver class: the call sites name the Screen subclass)
+*net.minecraft.class_4069 method_20085         (Lnet/minecraft/class_364;)V                 -> teafabric.web.compat.MinecraftCompat
+net.minecraft.class_2535  method_10747         (Lnet/minecraft/class_2561;)V                -> teafabric.web.compat.NetCompat
+io.netty.channel.ChannelHandler exceptionCaught (Lio/netty/channel/ChannelHandlerContext;Ljava/lang/Throwable;)V -> teafabric.web.compat.NetCompat
+# Netty on TeaVM
+io.netty.buffer.ByteBufUtil decodeString        (Lio/netty/buffer/ByteBuf;IILjava/nio/charset/Charset;)Ljava/lang/String; -> teafabric.web.compat.NetCompat
+io.netty.util.ResourceLeakDetector addExclusions (Ljava/lang/Class;[Ljava/lang/String;)V     -> teafabric.web.compat.NetCompat
+io.netty.util.internal.ObjectCleaner register  (Ljava/lang/Object;Ljava/lang/Runnable;)V    -> teafabric.web.compat.NetCompat
+*java.lang.Thread         setContextClassLoader (Ljava/lang/ClassLoader;)V                  -> teafabric.web.compat.LangCompat
+io.netty.bootstrap.ServerBootstrap bind         ()Lio/netty/channel/ChannelFuture;           -> teafabric.web.compat.NetCompat
+net.minecraft.class_2535  method_10756          ()Z                                          -> teafabric.web.compat.NetCompat
+# ViaVersion (optional mod): its Java version check needs Runtime.version(), which its Java 8 build only
+# provides through a multi-release jar; it would only print a warning anyway.
+com.viaversion.viaversion.ViaManagerImpl checkJavaVersion ()V                              -> teafabric.web.compat.LangCompat#ignore(Ljava/lang/Object;)V
+net.minecraft.class_3797  <init>                (Lcom/google/gson/JsonObject;)V              -> teafabric.web.compat.MinecraftCompat
+# JvmDowngrader stubs inside ViaVersion's Java 8 build (relocated to viaversion.xyz.wagyourtail.jvmdg).
+viaversion.xyz.wagyourtail.jvmdg.j11.stub.java_base.J_U_Collection toArray (Ljava/util/Collection;Ljava/util/function/IntFunction;)[Ljava/lang/Object; -> teafabric.web.compat.LangCompat
+viaversion.xyz.wagyourtail.jvmdg.j11.stub.java_base.J_U_Optional isEmpty (Ljava/util/Optional;)Z -> teafabric.web.compat.LangCompat
+viaversion.xyz.wagyourtail.jvmdg.j16.stub.java_base.J_U_S_Stream toList (Ljava/util/stream/Stream;)Ljava/util/List; -> teafabric.web.compat.LangCompat
+viaversion.xyz.wagyourtail.jvmdg.j9.stub.java_base.J_L_Runtime version ()Lviaversion/xyz/wagyourtail/jvmdg/j9/stub/java_base/J_L_Runtime$Version; -> teafabric.web.compat.LangCompat#runtimeVersion()Ljava/lang/Object;
+viaversion.xyz.wagyourtail.jvmdg.j10.stub.java_base.J_L_Runtime$Version feature (Lviaversion/xyz/wagyourtail/jvmdg/j9/stub/java_base/J_L_Runtime$Version;)I -> teafabric.web.compat.LangCompat#runtimeFeatureVersion(Ljava/lang/Object;)I
+# ViaVersion calls Netty codecs through reflective method handles.
+com.viaversion.viaversion.util.PipelineUtil privateHandleUnchecked (Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle; -> teafabric.web.compat.InvokeCompat
+com.viaversion.viaversion.util.PipelineUtil callDecode (Lio/netty/handler/codec/ByteToMessageDecoder;Lio/netty/channel/ChannelHandlerContext;Ljava/lang/Object;)Ljava/util/List; -> io.netty.handler.codec.TeaFabricCodecs
+com.viaversion.viaversion.util.PipelineUtil callEncode (Lio/netty/handler/codec/MessageToByteEncoder;Lio/netty/channel/ChannelHandlerContext;Ljava/lang/Object;Lio/netty/buffer/ByteBuf;)V -> io.netty.handler.codec.TeaFabricCodecs
+com.viaversion.viaversion.util.PipelineUtil callDecode (Lio/netty/handler/codec/MessageToMessageDecoder;Lio/netty/channel/ChannelHandlerContext;Ljava/lang/Object;)Ljava/util/List; -> io.netty.handler.codec.TeaFabricCodecs
+# ViaVersion's update check: a cross-origin request the page is not allowed to make.
+com.viaversion.viaversion.update.UpdateUtil sendUpdateMessage ()V -> teafabric.web.compat.LangCompat#ignore()V
+com.viaversion.viaversion.update.UpdateUtil sendUpdateMessage (Lcom/viaversion/viaversion/api/connection/UserConnection;)V -> teafabric.web.compat.LangCompat#ignore(Ljava/lang/Object;)V
+net.minecraft.class_3515  method_15237          ()Ljava/security/KeyPair;                    -> teafabric.web.compat.MinecraftCompat
+java.lang.reflect.Array    newInstance          (Ljava/lang/Class;[I)Ljava/lang/Object;       -> teafabric.web.compat.LangCompat
+*net.minecraft.class_1255 method_18857          (Ljava/util/function/BooleanSupplier;)V      -> teafabric.web.compat.MinecraftCompat
+java.nio.file.Files       newByteChannel        (Ljava/nio/file/Path;Ljava/util/Set;[Ljava/nio/file/attribute/FileAttribute;)Ljava/nio/channels/SeekableByteChannel; -> teafabric.web.compat.IoCompat
+java.nio.file.Files       newByteChannel        (Ljava/nio/file/Path;[Ljava/nio/file/OpenOption;)Ljava/nio/channels/SeekableByteChannel; -> teafabric.web.compat.IoCompat
+# Singleplayer spawn area (?spawnRadius)
+net.minecraft.class_3215  method_17297          (Lnet/minecraft/class_3230;Lnet/minecraft/class_1923;ILjava/lang/Object;)V -> teafabric.web.compat.MinecraftCompat
+net.minecraft.class_3215  method_17300          (Lnet/minecraft/class_3230;Lnet/minecraft/class_1923;ILjava/lang/Object;)V -> teafabric.web.compat.MinecraftCompat
+net.minecraft.class_3215  method_17301          ()I                                          -> teafabric.web.compat.MinecraftCompat
+net.minecraft.class_3950  create                (I)Lnet/minecraft/class_3949;                -> teafabric.web.compat.MinecraftCompat
+# Util.getOperatingSystem().open(...): folders download as zip, files download, links open a tab
+net.minecraft.class_156$class_158 method_672  (Ljava/io/File;)V                             -> teafabric.web.compat.DesktopCompat
+net.minecraft.class_156$class_158 method_669  (Ljava/net/URL;)V                             -> teafabric.web.compat.DesktopCompat
+net.minecraft.class_156$class_158 method_673  (Ljava/net/URI;)V                             -> teafabric.web.compat.DesktopCompat
+net.minecraft.class_156$class_158 method_670  (Ljava/lang/String;)V                         -> teafabric.web.compat.DesktopCompat

@@ -94,6 +94,16 @@ Put additional Fabric mods (release jars for 1.16.5) into `./mods/`; they are ba
 Requirements: JDK 21, Gradle 8.14 (or the wrapper), ~6 GB RAM for TeaVM, network access to
 piston-meta/piston-data/libraries/resources (Mojang), meta/maven.fabricmc.net and Maven Central.
 
+One command does everything below (download on the first run, bake, compile with the stub loop,
+package):
+
+```bash
+scripts/build-web.sh                          # game + Fabric API + every jar in ./mods
+python3 -m http.server -d build/web 8080      # open http://localhost:8080/
+```
+
+The individual steps:
+
 ```bash
 gradle :tools:setupMinecraft          # download Minecraft 1.16.5 + latest Fabric (once)
 gradle :tools:remapIntermediary       # intermediary client (compile classpath for web mods)
@@ -109,12 +119,113 @@ Useful properties: `-PteavmFast=true` (fast dependency analysis), `-PteavmOpt=SI
 `-PteavmDeobfuscation=false`, `-PteavmHeap=8g` (compiler JVM heap), `-PteavmMaxHeap=1024` (Wasm heap, MiB),
 `-PteavmTarget=js` (TeaVM JavaScript backend instead of Wasm GC), `-PwebLanguages=all` or `=zh_tw,ja_jp`.
 
+## Multiplayer
+
+A web page cannot open TCP connections, so the game connects to servers through a small
+WebSocket-to-TCP relay. Run it next to (or in front of) the Minecraft server:
+
+```bash
+node proxy/ws-proxy.js --target mc.example.com:25565            # ws://<this host>:8081/
+node proxy/ws-proxy.js --target localhost:25565 --listen 443 --cert cert.pem --key key.pem   # wss://
+```
+
+In the game, enter the relay's address as the server address (Add Server or Direct Connection), e.g.
+`wss://proxy.example.com/` or `ws://192.168.1.10:8081`. A relay started with `--allow host1,host2`
+(or `--allow-any`, an open relay) lets the address choose the server:
+`wss://proxy.example.com/?target=mc.example.com:25565`. A page opened as `index.html?proxy=wss://…`
+accepts plain `host:port` addresses and sends them through that relay; `index.html?server=wss://…`
+connects right after start-up. Pages served over `https://` can only use `wss://`.
+
+The relay has no dependencies (Node.js 16+); `node proxy/ws-proxy.js --help` lists the options
+(listen address, allow-list, TLS, allowed page origins). Only offline-mode servers can be joined
+(`online-mode=false`, or a proxy such as Velocity/Bungee handling authentication): a browser cannot
+log in to Microsoft accounts or reach Mojang's session servers.
+
+## Singleplayer
+
+Singleplayer runs Minecraft's own integrated server inside the page, on green threads next to the
+client: Singleplayer → Create New World works as usual.
+
+* **Worlds are kept** in the browser's storage (IndexedDB), with the options, the server list, config
+  and resource packs: files are written back a few seconds after the game saves them (Minecraft saves
+  a world when the game is paused and when it is left, so use *Save and Quit* or pause before closing
+  the tab). `?nopersist` starts without saved data and keeps nothing; `?resetstorage` deletes it first.
+  Clearing the site's data in the browser removes it too.
+* **Smaller spawn area**: vanilla generates 21×21 chunks around the spawn before a new world opens and
+  keeps them loaded forever. In the page the radius is 5 (9×9 chunks) by default, which brings world
+  creation from about 160 s to about 55 s (headless Chromium, software WebGL) and leaves the server less
+  to tick; `?spawnRadius=11` restores vanilla behaviour (1–11).
+* **Backups / moving worlds**: *Open World Folder* (Edit World) downloads the world as a zip, *Make
+  Backup* followed by *Open Backups Folder* downloads the backup; other "Open … Folder" buttons work the
+  same way and web links open in a new tab. Dropping a world zip on the Select World screen imports it.
+
+How it works:
+
+* the client and the integrated server talk over a pair of in-memory Netty channels (Netty's local
+  transport needs event-loop threads), pumped once per frame;
+* worker tasks submitted by the server (world generation, region-file I/O) run on a worker green thread
+  that yields after every task, and the server's task loop yields too, so the page never freezes;
+* fixes for TeaVM's in-memory file system and class library that saving needs: files opened `"rw"`
+  are no longer truncated, `FileChannel.open(CREATE)` creates files, direct buffers are zeroed,
+  `Deflater` accepts `Z_BUF_ERROR`, `Files.newByteChannel`, multi-dimensional `Array.newInstance`;
+* the server's RSA key pair is skipped (only online-mode logins over the network use it).
+
+Performance (headless Chromium, SwiftShader software WebGL, 4 cores): about 6 fps while playing and
+server ticks of roughly 200 ms instead of 50 ms with the vanilla spawn area — the client and the server
+share one browser thread. A real GPU helps the frame rate; a lower render distance helps both.
+"Open to LAN" is impossible in a browser.
+
+## Mods
+
+Fabric mods (jars for Minecraft 1.16.5) go into `./mods`; run `scripts/build-web.sh` again. Mods
+are baked in at build time: Fabric Loader and Mixin run during `gradle bake`, and TeaVM compiles the
+game and the mods together into one WebAssembly module. Nested jars (jar-in-jar), multi-release jars
+and classes that MixinExtras generates while applying mixins are all baked in; mod resources stay
+reachable through the class path (`getResourceAsStream`) as on a JVM.
+
+**Loading a mod jar into a running page is not possible**, and no amount of patching changes that:
+
+* there is no JVM, class loader or bytecode in the page, only Wasm compiled ahead of time from the
+  whole program (dead code removed, calls devirtualised and inlined across Minecraft and all mods);
+* a Fabric mod is mostly mixins, which rewrite *Minecraft's own* methods; those methods are already
+  machine code, compiled with the mixins of the mods present at build time;
+* the alternative, a JVM interpreter written for Wasm running the whole game, would be an entirely
+  different project and orders of magnitude slower.
+
+What does work without a rebuild:
+
+* **Resource packs**: drag the pack `.zip` onto the page while the Resource Packs screen is open.
+* **Data packs**: drag them onto Create World → Data Packs (singleplayer), or install them on a server.
+* **Server-side mods and plugins** of the server you connect to (anything that needs no client code).
+
+Rebuilding after adding jars to `./mods` takes about 15–25 minutes (bake + TeaVM + packaging), and
+the result is a new static `build/web` directory to serve.
+
+### Server protocol: 1.12.2 / 1.16.5 (ViaFabric)
+
+With [ViaFabric](https://modrinth.com/mod/viafabric) 0.4.x (it includes ViaVersion) in `./mods`, the
+1.16.5 client can join servers running older versions (1.8 – 1.16.4) — ViaVersion translates in the
+newer-client-to-older-server direction, so no ViaBackwards is needed. Pick the version with the **VIA**
+button at the top right of the Multiplayer screen: press *Enable client-side* and type the version
+(`1.12.2`, or a protocol number such as `340`) in the field. Or open the page with `?protocol=1.12.2`
+(also `?protocol=auto` or a protocol number); `?protocol=1.16.5` connects natively. The in-game setting
+lives in the in-memory game directory, so it lasts until the page is reloaded; the URL switch is applied
+at every start. Tested: joining a vanilla 1.12.2 server through the relay, world, movement and chat; F3
+shows `[ViaFabric] … C: 1.16.4-1.16.5 (754) S: 1.12.2 (340)`.
+
+ViaVersion needed a few browser accommodations (all in the platform layer, inactive without the mod):
+its JvmDowngrader stubs and `PipelineUtil` reflect on JDK / Netty internals and are redirected to
+direct implementations, its relocated Gson `TypeToken`s get build-time generic-supertype tables, and its
+update check is skipped. Its protocol auto-detection (`AUTO`) cannot open a second connection from the
+page, so pick the version explicitly.
+
 Page switches (debugging): `?log` (log overlay), `?username=Name`, `?threads` (Minecraft worker pools
 on green threads instead of inline), `?trace` (GL upload/draw trace), `?beacon` (log lines are sent to
 the HTTP server, survives renderer crashes), `?nogl`, `?noaudio`, `?nobuiltins`, `?nodeobf`,
 `?nofinalize` / `?noweak` (no GC callbacks into Wasm / strong weak references), `?waits` (print the
 Java stack of any lock/future/park wait blocked for more than 5 s: finds green-thread deadlocks),
-`?vanillaMain` (start through `net.minecraft.client.main.Main`).
+`?vanillaMain` (start through `net.minecraft.client.main.Main`), `?debug` (DEBUG log level),
+`?netdebug` (stacks for disconnects and closed connections).
 
 ## Status
 
@@ -128,11 +239,16 @@ Working:
   the Mojang loading screen, and the **title screen** (panorama, logo, splash text, buttons, mouse
   hover) rendered through WebGL 2 and the fixed-function shader JIT, frame-paced by
   `requestAnimationFrame`.
+* Text input in screens (letters, IME / Chinese, clipboard), multiplayer over `ws://` / `wss://`
+  (joining a 1.16.5 server, world rendering, walking, chat, the F3 screen).
+* TeaVM class-library bugs found by running the same programs on the JVM and in the browser and
+  diffing the output, all patched in `compiler/src/runtime`: `ArrayDeque` iterator removal,
+  `ListIterator.add`, `java.util.Random` (now bit-identical to the JDK), `Math.round/rint/ulp/cbrt/log10`,
+  `String.format` (`%%`, `%n`, `%f` rounding and `-0.0`), superclass-first static initialisation (in the
+  `SplitClinits` pre-pass), `ConcurrentHashMap.newKeySet`, `Logger(String, String)`.
 
 Not working yet / known issues:
 
-* Not tried yet beyond the title screen: Singleplayer (integrated server), world rendering, keyboard
-  text input in screens.
 * Fixed on the way to the title screen (TeaVM 0.16.0 issues, all patched in `compiler/`):
   `@Async` implementations were coroutine-transformed when anything they call may suspend
   (`AsyncMethodFinder`; `Object.wait` never released its monitor, `requestAnimationFrame` was never
@@ -145,7 +261,7 @@ Not working yet / known issues:
   `--wasm-tier-up-filter`, fixed by the function splitters above. Strict mode stays enabled because
   null dereferences relying on engine traps crash Chromium (reproduced with a 10-line TeaVM program).
 * Sounds: Ogg Vorbis decoding is not wired up yet (`.ogg` assets are not packaged).
-* No world persistence (IndexedDB) yet; integrated server / single-player untested.
+* Singleplayer is slow: the integrated server shares the page's only thread with the client.
 * Multiplayer needs a WebSocket ↔ TCP proxy (browsers cannot open TCP sockets); online-mode
   authentication is not available.
 * Performance work (optimisation level, uniform caching, streaming buffers) has not started.

@@ -113,9 +113,11 @@ def tablesJar = file('.cache/generated/tables.jar')
 tasks.register('generateTables', JavaExec) {
     group = 'teafabric'
     description = 'Whole-program reflection replacement tables (generic supertypes of TypeTokens).'
-    dependsOn ':tools:classes', ':platform:classes'
+    dependsOn ':tools:classes', ':platform:classes', ':platform:legacyClasses', ':compiler:runtimeClasses'
     classpath = project(':tools').sourceSets.main.runtimeClasspath
     mainClass = 'teafabric.tools.GenerateTables'
+    // Re-run whenever the baked jar (i.e. the set of mods) or the platform layer changes.
+    inputs.files({ programClasspath() }).withPropertyName('programClasspath')
     outputs.file(tablesJar)
     doFirst {
         args "--out=${tablesJar}",
@@ -128,9 +130,11 @@ def clinitsJar = file('.cache/generated/clinits.jar')
 tasks.register('splitClinits', JavaExec) {
     group = 'teafabric'
     description = 'Splits huge static initialisers (Blocks, Items, ...) so V8 can optimise them without running out of memory.'
-    dependsOn ':tools:classes', ':platform:classes'
+    dependsOn ':tools:classes', ':platform:classes', ':platform:legacyClasses', ':compiler:runtimeClasses'
     classpath = project(':tools').sourceSets.main.runtimeClasspath
     mainClass = 'teafabric.tools.SplitClinits'
+    // Re-run whenever the baked jar (i.e. the set of mods) or the platform layer changes.
+    inputs.files({ programClasspath() }).withPropertyName('programClasspath')
     outputs.file(clinitsJar)
     doFirst {
         args "--out=${clinitsJar}",
@@ -263,4 +267,13 @@ tasks.register('buildWeb') {
     group = 'teafabric'
     description = 'Full pipeline: setup -> bake -> TeaVM Wasm GC -> build/web.'
     dependsOn 'packageWeb'
+}
+
+tasks.register('printProgramClasspath') {
+    group = 'teafabric'
+    description = 'Prints the TeaVM program class path (for compiling test programs against the game).'
+    doLast {
+        println(([tablesJar, clinitsJar] + programClasspath() + (stubsJar.exists() ? [stubsJar] : []))
+                .collect { it.absolutePath }.join(File.pathSeparator))
+    }
 }

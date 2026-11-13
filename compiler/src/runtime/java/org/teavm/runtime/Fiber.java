@@ -297,10 +297,17 @@ public final class Fiber {
         Thread javaThread = Thread.currentThread();
         if (fiber.isResuming()) {
             fiber.state = STATE_RUNNING;
-            if (fiber.exception != null) {
-                throw fiber.exception;
+            // TeaFabric patch: consume the outcome. TeaVM 0.16.0 left fiber.exception set, so after one
+            // failed async call (e.g. an interrupted wait) every later async call of that thread rethrew
+            // the same exception when it resumed.
+            Throwable exception = fiber.exception;
+            Object result = fiber.result;
+            fiber.exception = null;
+            fiber.result = null;
+            if (exception != null) {
+                throw exception;
             }
-            return fiber.result;
+            return result;
         }
         PendingCall pendingCall = new PendingCall(call, lastPendingCall);
         if (lastPendingCall != null) {
@@ -308,10 +315,33 @@ public final class Fiber {
         }
         lastPendingCall = pendingCall;
 
-        fiber.state = STATE_SUSPENDING;
         pendingCall.callback = new AsyncCallbackImpl(pendingCall, javaThread, fiber);
-        call.run(pendingCall.callback);
+        // TeaFabric patch: run the asynchronous implementation while the fiber still counts as running
+        // and only then mark it as suspending. TeaVM 0.16.0 set STATE_SUSPENDING first; every
+        // coroutine-transformed method the implementation called then "saved its frame" and returned
+        // at its first call. In a program of Minecraft's size nearly everything is classified as
+        // possibly suspending (e.g. ArrayDeque.add), so Object.wait() never registered its listener and
+        // notify()/notifyAll() could not wake it (Thread.join, LockSupport.park/unpark, futures, ...).
+        try {
+            call.run(pendingCall.callback);
+        } catch (Throwable t) {
+            unlink(pendingCall);
+            throw t;
+        }
+        fiber.state = STATE_SUSPENDING;
         return null;
+    }
+
+    private static void unlink(PendingCall pendingCall) {
+        if (pendingCall.previous != null) {
+            pendingCall.previous.next = pendingCall.next;
+        }
+        if (pendingCall.next != null) {
+            pendingCall.next.previous = pendingCall.previous;
+        }
+        if (pendingCall == lastPendingCall) {
+            lastPendingCall = pendingCall.previous;
+        }
     }
 
     static class AsyncCallbackImpl implements AsyncCallback<Object> {

@@ -49,4 +49,10 @@ public final class OfflineSessionService implements MinecraftSessionService {
         // Minecraft falls back to OfflineSocialInteractions on this exception.
         throw new AuthenticationException("Offline (browser) session");
     }
+
+    /** Interface call sites ({@code AuthenticationService.createMinecraftSessionService()}). */
+    public static com.mojang.authlib.minecraft.MinecraftSessionService createMinecraftSessionService(
+            com.mojang.authlib.AuthenticationService service) {
+        return new OfflineSessionService();
+    }
 }

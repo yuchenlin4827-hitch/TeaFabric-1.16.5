@@ -24,6 +24,18 @@ public final class IoCompat {
     private IoCompat() {
     }
 
+    /** {@code Files.newByteChannel}: TeaVM has none; a FileChannel on the in-memory file system (world icon.png). */
+    public static java.nio.channels.SeekableByteChannel newByteChannel(Path path,
+            java.util.Set<? extends java.nio.file.OpenOption> options, java.nio.file.attribute.FileAttribute<?>... attrs)
+            throws java.io.IOException {
+        return FileChannel.open(path, options, attrs);
+    }
+
+    public static java.nio.channels.SeekableByteChannel newByteChannel(Path path, java.nio.file.OpenOption... options)
+            throws java.io.IOException {
+        return FileChannel.open(path, options);
+    }
+
     public static Path toPath(File file) {
         return Paths.get(file.getPath());
     }

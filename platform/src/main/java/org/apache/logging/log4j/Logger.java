@@ -46,14 +46,22 @@ public interface Logger {
         return LogManager.threshold();
     }
 
+    /**
+     * Exceptions logged at DEBUG are shown even when DEBUG is off: Minecraft reports swallowed failures
+     * that way (e.g. the exception that makes it drop a connection), and here they are what one needs.
+     */
+    default boolean isShown(Level level, Throwable t) {
+        return isEnabled(level) || (t != null && level == Level.DEBUG);
+    }
+
     default void doLog(Level level, Marker marker, String format, Object[] params) {
-        if (!isEnabled(level)) {
-            return;
-        }
         Throwable t = null;
-        int placeholders = LogFormat.countPlaceholders(format);
-        if (params != null && params.length > placeholders && params[params.length - 1] instanceof Throwable) {
+        if (params != null && params.length > 0 && params[params.length - 1] instanceof Throwable
+                && params.length > LogFormat.countPlaceholders(format)) {
             t = (Throwable) params[params.length - 1];
+        }
+        if (!isShown(level, t)) {
+            return;
         }
         logMessage(level, marker, LogFormat.format(format, params), t);
     }
@@ -74,7 +82,7 @@ public interface Logger {
     }
 
     default void log(Level level, String message, Throwable t) {
-        if (isEnabled(level)) {
+        if (isShown(level, t)) {
             logMessage(level, null, message, t);
         }
     }
@@ -266,10 +274,10 @@ public interface Logger {
         doLog(Level.DEBUG, null, String.valueOf(message), null);
     }
     default void debug(String message, Throwable t) {
-        if (isEnabled(Level.DEBUG)) { logMessage(Level.DEBUG, null, message, t); }
+        if (isShown(Level.DEBUG, t)) { logMessage(Level.DEBUG, null, message, t); }
     }
     default void debug(Object message, Throwable t) {
-        if (isEnabled(Level.DEBUG)) { logMessage(Level.DEBUG, null, String.valueOf(message), t); }
+        if (isShown(Level.DEBUG, t)) { logMessage(Level.DEBUG, null, String.valueOf(message), t); }
     }
     default void debug(String message, Object... params) {
         doLog(Level.DEBUG, null, message, params);
@@ -281,13 +289,13 @@ public interface Logger {
         if (isEnabled(Level.DEBUG)) { logMessage(Level.DEBUG, null, String.valueOf(supplier.get()), null); }
     }
     default void debug(Supplier<?> supplier, Throwable t) {
-        if (isEnabled(Level.DEBUG)) { logMessage(Level.DEBUG, null, String.valueOf(supplier.get()), t); }
+        if (isShown(Level.DEBUG, t)) { logMessage(Level.DEBUG, null, String.valueOf(supplier.get()), t); }
     }
     default void debug(Message message) {
         if (isEnabled(Level.DEBUG)) { logMessage(Level.DEBUG, null, message.getFormattedMessage(), message.getThrowable()); }
     }
     default void debug(Message message, Throwable t) {
-        if (isEnabled(Level.DEBUG)) { logMessage(Level.DEBUG, null, message.getFormattedMessage(), t); }
+        if (isShown(Level.DEBUG, t)) { logMessage(Level.DEBUG, null, message.getFormattedMessage(), t); }
     }
     default void debug(Marker marker, String message) {
         doLog(Level.DEBUG, marker, message, null);
@@ -296,7 +304,7 @@ public interface Logger {
         doLog(Level.DEBUG, marker, String.valueOf(message), null);
     }
     default void debug(Marker marker, String message, Throwable t) {
-        if (isEnabled(Level.DEBUG)) { logMessage(Level.DEBUG, marker, message, t); }
+        if (isShown(Level.DEBUG, t)) { logMessage(Level.DEBUG, marker, message, t); }
     }
     default void debug(Marker marker, String message, Object... params) {
         doLog(Level.DEBUG, marker, message, params);

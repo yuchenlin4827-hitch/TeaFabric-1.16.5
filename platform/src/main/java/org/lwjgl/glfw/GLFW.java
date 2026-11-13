@@ -306,24 +306,35 @@ public class GLFW {
     public static void glfwPostEmptyEvent() {
     }
 
-    /** Delivers queued DOM events as GLFW callbacks. Event layout: [type, a, b, c, d]. */
+    /**
+     * Delivers queued DOM events as GLFW callbacks. Event layout: [type, a, b, c, d].
+     *
+     * <p>The events are taken out of the queue before any callback runs: a callback may render a frame
+     * itself (Minecraft does when it changes worlds or connects) and so poll again from inside this
+     * method; like GLFW, each event must be delivered exactly once.
+     */
     public static void glfwPollEvents() {
         int n = WebWindow.eventCount();
-        for (int i = 0; i < n; i++) {
-            int type = (int) WebWindow.eventField(i, 0);
-            double a = WebWindow.eventField(i, 1);
-            double b = WebWindow.eventField(i, 2);
-            int c = (int) WebWindow.eventField(i, 3);
-            int d = (int) WebWindow.eventField(i, 4);
-            try {
-                dispatch(type, a, b, c, d);
-            } catch (RuntimeException e) {
-                e.printStackTrace();
+        if (n > 0) {
+            double[] events = new double[n * 5];
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < 5; j++) {
+                    events[i * 5 + j] = WebWindow.eventField(i, j);
+                }
+            }
+            WebWindow.consumeEvents(n);
+            for (int i = 0; i < n; i++) {
+                try {
+                    dispatch((int) events[i * 5], events[i * 5 + 1], events[i * 5 + 2], (int) events[i * 5 + 3],
+                            (int) events[i * 5 + 4]);
+                } catch (RuntimeException e) {
+                    e.printStackTrace();
+                }
             }
         }
-        if (n > 0) {
-            WebWindow.consumeEvents(n);
-        }
+        // Network input is delivered on the render thread too (see WebSocketChannel).
+        teafabric.web.net.WebSocketChannel.pumpAll();
+        teafabric.web.net.MemoryChannel.pumpAll(); // singleplayer: client <-> integrated server
     }
 
     private static void dispatch(int type, double a, double b, int c, int d) {
@@ -412,6 +423,17 @@ public class GLFW {
             NativeMemory.putLong(names + 8L * i, strings[i]);
         }
         WebWindow.clearDrops();
+        java.util.List<String> dropped = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            dropped.add(teafabric.web.vfs.WebFileSystem.GAME_DIR + "/dropped/" + WebWindow.dropName(i));
+        }
+        if (teafabric.web.compat.DesktopCompat.importDropped(dropped)) {
+            for (long s : strings) {
+                NativeMemory.free(s);
+            }
+            NativeMemory.free(names);
+            return; // worlds imported on the Select World screen
+        }
         try {
             dropCallback.invoke(WINDOW, count, names);
         } finally {
