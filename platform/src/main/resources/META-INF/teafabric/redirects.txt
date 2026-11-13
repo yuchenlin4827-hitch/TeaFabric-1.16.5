@@ -106,3 +106,13 @@ java.lang.reflect.Array    newInstance          (Ljava/lang/Class;[I)Ljava/lang/
 *net.minecraft.class_1255 method_18857          (Ljava/util/function/BooleanSupplier;)V      -> teafabric.web.compat.MinecraftCompat
 java.nio.file.Files       newByteChannel        (Ljava/nio/file/Path;Ljava/util/Set;[Ljava/nio/file/attribute/FileAttribute;)Ljava/nio/channels/SeekableByteChannel; -> teafabric.web.compat.IoCompat
 java.nio.file.Files       newByteChannel        (Ljava/nio/file/Path;[Ljava/nio/file/OpenOption;)Ljava/nio/channels/SeekableByteChannel; -> teafabric.web.compat.IoCompat
+# Singleplayer spawn area (?spawnRadius)
+net.minecraft.class_3215  method_17297          (Lnet/minecraft/class_3230;Lnet/minecraft/class_1923;ILjava/lang/Object;)V -> teafabric.web.compat.MinecraftCompat
+net.minecraft.class_3215  method_17300          (Lnet/minecraft/class_3230;Lnet/minecraft/class_1923;ILjava/lang/Object;)V -> teafabric.web.compat.MinecraftCompat
+net.minecraft.class_3215  method_17301          ()I                                          -> teafabric.web.compat.MinecraftCompat
+net.minecraft.class_3950  create                (I)Lnet/minecraft/class_3949;                -> teafabric.web.compat.MinecraftCompat
+# Util.getOperatingSystem().open(...): folders download as zip, files download, links open a tab
+net.minecraft.class_156$class_158 method_672  (Ljava/io/File;)V                             -> teafabric.web.compat.DesktopCompat
+net.minecraft.class_156$class_158 method_669  (Ljava/net/URL;)V                             -> teafabric.web.compat.DesktopCompat
+net.minecraft.class_156$class_158 method_673  (Ljava/net/URI;)V                             -> teafabric.web.compat.DesktopCompat
+net.minecraft.class_156$class_158 method_670  (Ljava/lang/String;)V                         -> teafabric.web.compat.DesktopCompat

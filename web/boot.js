@@ -27,7 +27,8 @@
       netdebug: params.has('netdebug') ? '1' : null,
       server: params.get('server'),
       proxy: params.get('proxy'),
-      protocol: params.get('protocol')
+      protocol: params.get('protocol'),
+      spawnRadius: params.get('spawnRadius')
     }
   };
 
@@ -373,6 +374,72 @@
     window.WeakRef = function (v) { this.deref = function () { return v; }; };
   }
 
+  // Browser storage for the game directory: worlds, options, server list, config, resource packs.
+  // Read completely before the game starts; WebPersistence.java hands over changed files every few seconds.
+  tf.store = {
+    available: false,
+    restored: [],
+    pending: new Map(),
+    db: null,
+    init: async function () {
+      if (params.has('nopersist') || !window.indexedDB) return;
+      try {
+        if (params.has('resetstorage')) {
+          await new Promise(function (resolve) {
+            const del = indexedDB.deleteDatabase('teafabric');
+            del.onsuccess = del.onerror = del.onblocked = function () { resolve(); };
+          });
+        }
+        const db = await new Promise(function (resolve, reject) {
+          const req = indexedDB.open('teafabric', 1);
+          req.onupgradeneeded = function () { req.result.createObjectStore('files'); };
+          req.onsuccess = function () { resolve(req.result); };
+          req.onerror = function () { reject(req.error); };
+        });
+        this.restored = await new Promise(function (resolve, reject) {
+          const out = [];
+          const cursor = db.transaction('files', 'readonly').objectStore('files').openCursor();
+          cursor.onsuccess = function () {
+            const c = cursor.result;
+            if (!c) { resolve(out); return; }
+            out.push([c.key, c.value instanceof Int8Array ? c.value : new Int8Array(c.value)]);
+            c.continue();
+          };
+          cursor.onerror = function () { reject(cursor.error); };
+        });
+        this.db = db;
+        this.available = true;
+        if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
+      } catch (e) {
+        console.warn('[Storage] Browser storage (IndexedDB) unavailable; worlds will not be kept: ' + e);
+      }
+    },
+    put: function (path, data) { this.pending.set(path, data); },
+    remove: function (path) { this.pending.set(path, null); },
+    flush: function () {
+      if (!this.db || this.pending.size === 0) return;
+      const batch = this.pending;
+      this.pending = new Map();
+      const tx = this.db.transaction('files', 'readwrite');
+      const files = tx.objectStore('files');
+      batch.forEach(function (data, path) {
+        if (data === null) files.delete(path); else files.put(data, path);
+      });
+      tx.onerror = function () { console.warn('[Storage] Saving to browser storage failed: ' + tx.error); };
+    }
+  };
+
+  // DesktopCompat.java: "Open ... Folder" buttons download the folder as a zip.
+  tf.download = function (name, data) {
+    const url = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 10000);
+  };
+
   let wasmExports = null;
 
   async function start() {
@@ -381,8 +448,10 @@
       return;
     }
     try {
+      const storeReady = tf.store.init();
       tf.archives['/classpath'] = await fetchWithProgress('data/classpath.zip', 'Downloading game resources', 0.35, 0);
       tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.15, 0.35);
+      await storeReady;
       setStatus('Compiling WebAssembly…', 0.55);
       const teavm = await TeaVM.wasmGC.load('teavm/classes.wasm', {
         stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' },

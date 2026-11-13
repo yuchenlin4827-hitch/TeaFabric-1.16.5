@@ -113,6 +113,56 @@ public final class MinecraftCompat {
         });
     }
 
+    // ---- Spawn area. Vanilla keeps 21x21 chunks around the world spawn loaded (a radius-11 "start" ticket)
+    // and generates all of them before a new world can be entered: about 160 s in the browser, and the
+    // server keeps ticking them. ?spawnRadius=N (1-11, default 5: 9x9 chunks) makes it smaller.
+
+    private static int spawnRadius() {
+        String value = teafabric.web.Boot.config("spawnRadius");
+        if (value != null) {
+            try {
+                return Math.max(1, Math.min(11, Integer.parseInt(value.trim())));
+            } catch (NumberFormatException e) {
+                // default
+            }
+        }
+        return 5;
+    }
+
+    private static int spawnTicketRadius(net.minecraft.class_3230<?> type, int radius) {
+        return radius == 11 && "start".equals(String.valueOf(type)) ? spawnRadius() : radius;
+    }
+
+    /** {@code ServerChunkManager.addTicket}: the spawn ("start") ticket uses the browser's radius. */
+    public static <T> void method_17297(net.minecraft.class_3215 manager, net.minecraft.class_3230<T> type,
+            net.minecraft.class_1923 pos, int radius, T argument) {
+        manager.method_17297(type, pos, spawnTicketRadius(type, radius), argument);
+    }
+
+    /** {@code ServerChunkManager.removeTicket}: must match the radius the ticket was added with. */
+    public static <T> void method_17300(net.minecraft.class_3215 manager, net.minecraft.class_3230<T> type,
+            net.minecraft.class_1923 pos, int radius, T argument) {
+        manager.method_17300(type, pos, spawnTicketRadius(type, radius), argument);
+    }
+
+    /**
+     * {@code ServerChunkManager.getTotalChunksLoadedCount()} as MinecraftServer.prepareStartRegion uses it: it
+     * waits for exactly 441 (21x21) chunks; a radius-r ticket fully loads (2r-1)^2.
+     */
+    public static int method_17301(net.minecraft.class_3215 manager) {
+        int loaded = manager.method_17301();
+        int r = spawnRadius();
+        if (r == 11) {
+            return loaded;
+        }
+        return loaded >= (2 * r - 1) * (2 * r - 1) ? 441 : loaded;
+    }
+
+    /** {@code WorldGenerationProgressListenerFactory.create(11)}: progress (and the loading screen map) for the radius used. */
+    public static net.minecraft.class_3949 create(net.minecraft.class_3950 factory, int radius) {
+        return factory.create(radius == 11 ? spawnRadius() : radius);
+    }
+
     public static java.util.concurrent.Executor method_18349() {
         return pooled() ? net.minecraft.class_156.method_18349() : MIXED;
     }
