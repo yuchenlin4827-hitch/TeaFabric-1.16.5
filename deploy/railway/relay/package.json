@@ -1,0 +1,9 @@
+{
+  "name": "teafabric-relay",
+  "private": true,
+  "description": "WebSocket-to-TCP relay for TeaFabric (proxy/ws-proxy.js) as a Railway service next to the Minecraft server.",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node ws-proxy.js --listen ${PORT:-8081} --host :: --target ${MC_TARGET} ${ALLOWED_ORIGIN:+--origin $ALLOWED_ORIGIN}"
+  }
+}

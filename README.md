@@ -138,6 +138,31 @@ parts that `boot.js` reassembles (`teavm/classes.wasm.parts.json`). The same Wor
 connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
 (not tested yet; the free plan's CPU limits may cut busy connections).
 
+### A server for the web client on Railway
+
+A 1.16.5 server that the page can join, on [Railway](https://railway.com) (Hobby plan): the official
+`itzg/minecraft-server` image with a volume for the world, plus `proxy/ws-proxy.js` as a second service
+(`deploy/railway/relay`) that is the only way in: it reaches the server over Railway's private network
+(the server has no public port) and accepts WebSocket connections from your page's origin only.
+
+```bash
+npm i -g @railway/cli && railway login --browserless
+railway init --name teafabric-mc
+railway add --service minecraft --image itzg/minecraft-server:java21 \
+  --variables EULA=TRUE --variables VERSION=1.16.5 --variables ONLINE_MODE=FALSE --variables MEMORY=768M
+# add a volume mounted at /data to the minecraft service (dashboard, or the volumeCreate API)
+mkdir relay && cp deploy/railway/relay/package.json proxy/ws-proxy.js relay/ && cd relay
+railway add --service relay --variables 'MC_TARGET=${{minecraft.RAILWAY_PRIVATE_DOMAIN}}:25565' \
+  --variables ALLOWED_ORIGIN=https://<your page's host>
+railway up --service relay && railway domain --service relay
+```
+
+`EULA=TRUE` accepts Mojang's EULA. In the game, connect to `wss://<relay domain>/`. Keep the heap
+(`MEMORY`) about 250 MB below the service's memory limit: the JVM needs memory beyond the heap.
+Offline mode means anyone who can reach the relay picks any name; add `ENABLE_WHITELIST=TRUE` and
+`WHITELIST=Name1,Name2` to the minecraft service to limit who can join (choose your name with
+`index.html?username=Name`). Tested: the page on Cloudflare joined it, loaded the world and chatted.
+
 ## Multiplayer
 
 A web page cannot open TCP connections, so the game connects to servers through a small
