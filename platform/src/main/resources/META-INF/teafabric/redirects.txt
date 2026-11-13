@@ -104,3 +104,5 @@ com.viaversion.viaversion.update.UpdateUtil sendUpdateMessage (Lcom/viaversion/v
 net.minecraft.class_3515  method_15237          ()Ljava/security/KeyPair;                    -> teafabric.web.compat.MinecraftCompat
 java.lang.reflect.Array    newInstance          (Ljava/lang/Class;[I)Ljava/lang/Object;       -> teafabric.web.compat.LangCompat
 *net.minecraft.class_1255 method_18857          (Ljava/util/function/BooleanSupplier;)V      -> teafabric.web.compat.MinecraftCompat
+java.nio.file.Files       newByteChannel        (Ljava/nio/file/Path;Ljava/util/Set;[Ljava/nio/file/attribute/FileAttribute;)Ljava/nio/channels/SeekableByteChannel; -> teafabric.web.compat.IoCompat
+java.nio.file.Files       newByteChannel        (Ljava/nio/file/Path;[Ljava/nio/file/OpenOption;)Ljava/nio/channels/SeekableByteChannel; -> teafabric.web.compat.IoCompat
