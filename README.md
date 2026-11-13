@@ -138,32 +138,68 @@ parts that `boot.js` reassembles (`teavm/classes.wasm.parts.json`). The same Wor
 connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
 (not tested yet; the free plan's CPU limits may cut busy connections).
 
+**Downloadable version**: `/download/` (behind the same password) offers the game as a zip for people
+who would rather not load 150 MB from the site every time, e.g. on slow connections. It holds `build/web`
+plus a small launcher (`launcher/`, Go) for Windows, macOS and Linux that serves it on
+`http://127.0.0.1:47265/` and opens the default browser; the port is fixed because the browser keeps
+worlds per address. `scripts/package-desktop.sh` builds it (`build/TeaFabric-1.16.5.zip`, about 55 MB);
+the deploy script uploads it in 24 MiB parts that the Worker joins into one download with Range
+support, so downloads can be resumed. `SERVER_ADDRESS=wss://…` puts the server address on the page and
+in the zip's usage guide; `LAUNCHER=0` leaves the download out. A relay started with `--origin` must
+also allow `http://127.0.0.1:47265` for the downloaded version to join.
+
 ### A server for the web client on Railway
 
-A 1.16.5 server that the page can join, on [Railway](https://railway.com) (Hobby plan): the official
-`itzg/minecraft-server` image with a volume for the world, plus `proxy/ws-proxy.js` as a second service
+A 1.16.5 server that the page can join, on [Railway](https://railway.com) (Hobby plan): Paper 1.16.5 from
+the `itzg/minecraft-server` image with a volume for the world, plus `proxy/ws-proxy.js` as a second service
 (`deploy/railway/relay`) that is the only way in: it reaches the server over Railway's private network
 (the server has no public port) and accepts WebSocket connections from your page's origin only.
+
+The server runs in offline mode (the page has no Microsoft account), so names are not checked by Mojang.
+[AuthMe Reloaded](https://modrinth.com/plugin/authmereloaded) protects them instead: the first time a
+name joins, it must `/register <password> <password>`; after that, every join needs `/login <password>`
+before the player can move, chat or use commands. The name `Player` is banned.
 
 ```bash
 npm i -g @railway/cli && railway login --browserless
 railway init --name teafabric-mc
-railway add --service minecraft --image itzg/minecraft-server:java21 \
-  --variables EULA=TRUE --variables VERSION=1.16.5 --variables ONLINE_MODE=FALSE --variables MEMORY=768M
+railway add --service minecraft --image itzg/minecraft-server:java17 \
+  --variables EULA=TRUE --variables VERSION=1.16.5 --variables TYPE=PAPER --variables ONLINE_MODE=FALSE \
+  --variables MODRINTH_PROJECTS=authmereloaded --variables JVM_DD_OPTS=Paper.IgnoreJavaVersion=true \
+  --variables MEMORY=512M --variables MALLOC_ARENA_MAX=2 --variables VIEW_DISTANCE=6 --variables ALLOW_NETHER=FALSE \
+  --variables 'JVM_XX_OPTS=-XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=48m -Xss512k -XX:CICompilerCount=2 -XX:+ExitOnOutOfMemoryError' \
+  --variables 'RCON_CMDS_STARTUP=ban Player The name Player is not allowed. Reload the page with ?rename at the end of the address and choose your own name.'
 # add a volume mounted at /data to the minecraft service (dashboard, or the volumeCreate API)
 mkdir relay && cp deploy/railway/relay/package.json proxy/ws-proxy.js relay/ && cd relay
 railway add --service relay --variables 'MC_TARGET=${{minecraft.RAILWAY_PRIVATE_DOMAIN}}:25565' \
-  --variables ALLOWED_ORIGIN=https://<your page's host>
+  --variables ALLOWED_ORIGIN=https://<your page's host>,http://127.0.0.1:47265
 railway up --service relay && railway domain --service relay
 ```
 
-`EULA=TRUE` accepts Mojang's EULA. In the game, connect to `wss://<relay domain>/`. Keep the heap
-(`MEMORY`) about 250 MB below the service's memory limit: the JVM needs memory beyond the heap.
-Offline mode means anyone who can reach the relay picks any name; add `ENABLE_WHITELIST=TRUE` and
-`WHITELIST=Name1,Name2` to the minecraft service to limit who can join (choose your name with
-`index.html?username=Name`). Tested: the page on Cloudflare joined it, loaded the world and chatted.
+`EULA=TRUE` accepts Mojang's EULA. In the game, connect to `wss://<relay domain>/`.
+
+- **Java and Paper**: AuthMe 5.7 (the release for 1.16.5) needs Java 17, while Paper 1.16.5 refuses
+  Java 17 unless started with `-DPaper.IgnoreJavaVersion=true`; that combination runs fine.
+- **Memory**: with a 1 GB service limit, Paper with a 768 MB heap was killed for exceeding it (exit code
+  -1, no Java error). The settings above (512 MB heap, serial GC, capped metaspace/code cache/direct
+  memory, two malloc arenas, no Nether) keep the container at about 750 MB with a player online.
+- **Changing the ban message**: Minecraft keeps the first reason of a ban. To change it, put
+  `pardon Player` on the line before `ban Player …` in `RCON_CMDS_STARTUP` (the variable takes one
+  command per line).
+- **Whitelist**: to limit who can join at all, add `ENABLE_WHITELIST=TRUE` and `WHITELIST=Name1,Name2`.
+- **Forgotten passwords**: an operator can run `authme unregister <name>` on the server console (or add
+  it to `RCON_CMDS_STARTUP` once); a logged-in player can drop their own account with
+  `/unregister <password>` and change it with `/changepassword <old> <new>`.
+
+Tested from the page on Cloudflare: `Player` is refused with the ban message; a new name is asked to
+`/register`, registers, and after reloading the page is asked to `/login` and gets in.
 
 ## Multiplayer
+
+**Player name**: the loading page asks for one the first time (3–16 letters, digits or `_`; `Player` is
+refused) and the browser keeps it. Add `?rename` to the address to choose another, or `?username=Name` to
+use a name for that page only. In offline-mode servers the name is all that identifies a player, so use a
+login plugin there (see [the Railway server](#a-server-for-the-web-client-on-railway)).
 
 A web page cannot open TCP connections, so the game connects to servers through a small
 WebSocket-to-TCP relay. Run it next to (or in front of) the Minecraft server:
@@ -272,7 +308,7 @@ direct implementations, its relocated Gson `TypeToken`s get build-time generic-s
 update check is skipped. Its protocol auto-detection (`AUTO`) cannot open a second connection from the
 page, so pick the version explicitly.
 
-Page switches (debugging): `?log` (log overlay), `?username=Name`, `?threads` (Minecraft worker pools
+Page switches (debugging): `?log` (log overlay), `?username=Name`, `?rename` (ask for the player name again), `?threads` (Minecraft worker pools
 on green threads instead of inline), `?trace` (GL upload/draw trace), `?beacon` (log lines are sent to
 the HTTP server, survives renderer crashes), `?nogl`, `?noaudio`, `?nobuiltins`, `?nodeobf`,
 `?nofinalize` / `?noweak` (no GC callbacks into Wasm / strong weak references), `?waits` (print the

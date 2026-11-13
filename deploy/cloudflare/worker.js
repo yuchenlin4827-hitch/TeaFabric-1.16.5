@@ -6,6 +6,9 @@
 // signed cookie, which WebSocket connections to /relay carry.
 //
 // Multiplayer: in the game, connect to  wss://<this host>/relay?target=mc.example.com:25565
+//
+// /download/ offers the game as a zip (scripts/package-desktop.sh). It is over the 25 MiB file limit,
+// so it is stored in parts (download/parts/manifest.json) that serveSplit() joins into one download.
 import { connect } from "cloudflare:sockets";
 
 const COOKIE = "tf_auth";
@@ -19,6 +22,7 @@ export default {
         headers: { "Cache-Control": "no-store" },
       });
     }
+    const url = new URL(request.url);
     const token = await authToken(env.AUTH_PASSWORD);
     const viaPassword = await basicAuthOk(request, env.AUTH_PASSWORD);
     if (!viaPassword && cookie(request, COOKIE) !== token) {
@@ -30,10 +34,11 @@ export default {
         },
       });
     }
-    const url = new URL(request.url);
     let response;
     if (url.pathname === "/relay") {
       response = relay(request, url);
+    } else if (/^\/download\/[^/]+\.zip$/.test(url.pathname)) {
+      response = await serveSplit(request, env, url);
     } else {
       response = await env.ASSETS.fetch(request);
     }
@@ -137,4 +142,98 @@ function relay(request, url) {
     }
   })();
   return new Response(null, { status: 101, webSocket: client });
+}
+
+// One file stored as parts: streams the parts in order, or the requested byte range of them, so
+// downloads can be resumed. Whole parts are piped without passing through JavaScript; only the parts
+// at the ends of a range are read and cut.
+async function serveSplit(request, env, url) {
+  const manifestResponse = await env.ASSETS.fetch(new Request(url.origin + "/download/parts/manifest.json"));
+  if (!manifestResponse.ok) return new Response("Not found", { status: 404 });
+  const manifest = await manifestResponse.json();
+  if (url.pathname !== "/download/" + manifest.name) return new Response("Not found", { status: 404 });
+  const total = manifest.size;
+  let start = 0;
+  let end = total - 1;
+  const headers = new Headers({
+    "Content-Type": "application/zip",
+    "Content-Disposition": `attachment; filename="${manifest.name}"`,
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "private, no-transform",
+    ETag: `"${manifest.sha256}"`,
+  });
+  const range = request.headers.get("Range");
+  const ifRange = request.headers.get("If-Range");
+  let status = 200;
+  if (range && (!ifRange || ifRange === headers.get("ETag"))) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+    if (m && (m[1] !== "" || m[2] !== "")) {
+      if (m[1] === "") {
+        start = Math.max(0, total - Number(m[2]));
+      } else {
+        start = Number(m[1]);
+        if (m[2] !== "") end = Math.min(Number(m[2]), total - 1);
+      }
+      if (start > end || start >= total) {
+        return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${total}` } });
+      }
+      status = 206;
+      headers.set("Content-Range", `bytes ${start}-${end}/${total}`);
+    }
+  }
+  if (request.method === "HEAD") {
+    headers.set("Content-Length", String(end - start + 1));
+    return new Response(null, { status, headers });
+  }
+  const { readable, writable } = new FixedLengthStream(end - start + 1);
+  (async () => {
+    let offset = 0;
+    try {
+      for (const part of manifest.parts) {
+        const partStart = offset;
+        const partEnd = offset + part.size - 1;
+        offset += part.size;
+        if (partEnd < start || partStart > end) continue;
+        const from = Math.max(start, partStart) - partStart;
+        const to = Math.min(end, partEnd) - partStart;
+        // Static assets ignore Range: a part needed only in part is read whole and cut here.
+        const partResponse = await env.ASSETS.fetch(new Request(url.origin + "/download/parts/" + part.file));
+        if (partResponse.status !== 200) throw new Error(`part ${part.file}: HTTP ${partResponse.status}`);
+        if (from === 0 && to === part.size - 1) {
+          await partResponse.body.pipeTo(writable, { preventClose: true });
+        } else {
+          await pipeSlice(partResponse.body, writable, from, to);
+        }
+      }
+      await writable.close();
+    } catch (e) {
+      await writable.abort(e);
+    }
+  })();
+  return new Response(readable, { status, headers });
+}
+
+// Writes bytes from..to (inclusive) of body to writable, leaving writable open.
+async function pipeSlice(body, writable, from, to) {
+  const reader = body.getReader();
+  const writer = writable.getWriter();
+  let pos = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunkStart = pos;
+      pos += value.byteLength;
+      if (pos <= from) continue;
+      const a = Math.max(0, from - chunkStart);
+      const b = Math.min(value.byteLength, to + 1 - chunkStart);
+      if (b > a) await writer.write(value.subarray(a, b));
+      if (pos > to) {
+        await reader.cancel();
+        break;
+      }
+    }
+  } finally {
+    writer.releaseLock();
+  }
 }
