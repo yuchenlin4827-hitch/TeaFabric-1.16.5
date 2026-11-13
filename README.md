@@ -159,6 +159,11 @@ client: Singleplayer → Create New World works as usual.
   Backup* followed by *Open Backups Folder* downloads the backup; other "Open … Folder" buttons work the
   same way and web links open in a new tab. Dropping a world zip on the Select World screen imports it.
 
+Tested in headless Chromium: create a world (spawn area ≈50 s), Save and Quit, reload the page, the
+world is listed with its icon and opens at the same position; Open World Folder downloads
+`New World.zip`, Make Backup + Open Backups Folder downloads the backups, and dropping
+`New World.zip` back on the list adds "New World (2)", which opens.
+
 How it works:
 
 * the client and the integrated server talk over a pair of in-memory Netty channels (Netty's local
@@ -170,9 +175,10 @@ How it works:
   `Deflater` accepts `Z_BUF_ERROR`, `Files.newByteChannel`, multi-dimensional `Array.newInstance`;
 * the server's RSA key pair is skipped (only online-mode logins over the network use it).
 
-Performance (headless Chromium, SwiftShader software WebGL, 4 cores): about 6 fps while playing and
-server ticks of roughly 200 ms instead of 50 ms with the vanilla spawn area — the client and the server
-share one browser thread. A real GPU helps the frame rate; a lower render distance helps both.
+Performance (headless Chromium, SwiftShader software WebGL, 4 cores): about 6 fps while playing;
+server ticks of 100–150 ms with the default spawn area (≈200 ms with the vanilla one) instead of 50 ms —
+the client and the server share one browser thread. A real GPU helps the frame rate; a lower render
+distance helps both.
 "Open to LAN" is impossible in a browser.
 
 ## Mods
