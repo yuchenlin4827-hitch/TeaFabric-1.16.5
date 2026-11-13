@@ -17,7 +17,7 @@
     archives: {},
     clipboard: '',
     config: {
-      username: params.get('username') || localStorage.getItem('teafabric.username') || 'Player',
+      username: null, // chosen before the game starts: see chooseName()
       probe: params.has('probe') ? '1' : null,
       threads: params.has('threads') ? '1' : null,
       trace: params.has('trace') ? '1' : null,
@@ -476,6 +476,60 @@
     setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 10000);
   };
 
+  // ------------------------------------------------------------------ player name
+
+  // Minecraft names: 3-16 letters, digits or _. "Player", the old default, is refused: many people would
+  // share it, and servers (the Railway one included) ban it.
+  function validName(name) {
+    return typeof name === 'string' && /^[A-Za-z0-9_]{3,16}$/.test(name) && name.toLowerCase() !== 'player';
+  }
+
+  function storedName() {
+    try {
+      return localStorage.getItem('teafabric.username');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ?username=Name uses that name; otherwise the name saved by an earlier visit. Without one (or with
+  // ?rename) the loading panel asks, while the game downloads.
+  function chooseName() {
+    const given = params.get('username');
+    if (validName(given)) return Promise.resolve(given);
+    const saved = storedName();
+    if (!params.has('rename') && !given && validName(saved)) return Promise.resolve(saved);
+    const form = document.getElementById('name-form');
+    const input = document.getElementById('name-input');
+    const hint = document.getElementById('name-hint');
+    input.value = validName(given) ? given : validName(saved) ? saved : '';
+    form.hidden = false;
+    if (given) {
+      hint.textContent = '"' + given + '" cannot be used. Choose another name: 3–16 letters, digits or _ (not "Player").';
+      hint.classList.add('error');
+    }
+    input.focus();
+    return new Promise(function (resolve) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        const name = input.value.trim();
+        if (!validName(name)) {
+          hint.textContent = name.toLowerCase() === 'player'
+            ? '"Player" is not allowed: choose your own name.'
+            : 'Use 3–16 letters, digits or _.';
+          hint.classList.add('error');
+          input.focus();
+          return;
+        }
+        try {
+          localStorage.setItem('teafabric.username', name);
+        } catch (e) { /* not kept: asked again next time */ }
+        form.hidden = true;
+        resolve(name);
+      });
+    });
+  }
+
   let wasmExports = null;
 
   async function start() {
@@ -484,11 +538,16 @@
       return;
     }
     try {
+      const nameChosen = chooseName().then(function (name) { tf.config.username = name; });
       const storeReady = tf.store.init();
       tf.archives['/classpath'] = await fetchWithProgress('data/classpath.zip', 'Downloading game resources', 0.2, 0);
       tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.1, 0.2);
       await loadSplitWasm(0.3, 0.2);
       await storeReady;
+      if (!tf.config.username) {
+        setStatus('Enter a player name to start.', 0.5);
+        await nameChosen;
+      }
       setStatus('Compiling WebAssembly…', 0.55);
       const teavm = await TeaVM.wasmGC.load('teavm/classes.wasm', {
         stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' },

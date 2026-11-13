@@ -13,6 +13,15 @@
       <h1>TeaFabric <span>1.16.5</span></h1>
       <p id="status">Loading…</p>
       <div id="bar"><div id="fill"></div></div>
+      <form id="name-form" hidden novalidate>
+        <label for="name-input">Player name</label>
+        <div id="name-row">
+          <input id="name-input" maxlength="16" autocomplete="username" spellcheck="false"
+                 pattern="[A-Za-z0-9_]{3,16}" required>
+          <button type="submit">Play</button>
+        </div>
+        <p id="name-hint">3–16 letters, digits or _. Servers may ask you to /register a password for it.</p>
+      </form>
       <p id="note">Minecraft 1.16.5 · Fabric Loader · TeaVM WebAssembly GC</p>
     </div>
   </div>
