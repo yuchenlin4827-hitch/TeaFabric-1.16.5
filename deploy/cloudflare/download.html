@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>下載啟動器</title>
+  <title>下載 TeaFabric</title>
   <style>
     :root {
       --bg: #101418;
@@ -101,44 +101,40 @@
 </head>
 <body>
 <main>
-  <h1>下載啟動器</h1>
-  <p class="lead">用一般的 Minecraft Java 版加入伺服器。這裡轉載的是開源啟動器 HMCL {{VERSION}}，下載速度比 GitHub 快。</p>
+  <h1>下載 TeaFabric</h1>
+  <p class="lead">下載一次就能在自己的電腦上玩，不用每次從網站載入一百多 MB。遊戲照樣在瀏覽器裡執行，由附帶的小程式在本機提供檔案。</p>
 
   <section>
-    <h2>HMCL {{VERSION}}</h2>
+    <h2>TeaFabric 1.16.5</h2>
     <div class="files">
       <div class="file">
-        <div class="what"><strong>Windows</strong><span>{{EXE_FILE}} · {{EXE_SIZE}}</span></div>
-        <a class="button" href="{{EXE_FILE}}" download>下載 .exe</a>
-        <div class="sha">SHA-256 {{EXE_SHA256}}</div>
-      </div>
-      <div class="file">
-        <div class="what"><strong>macOS / Linux / 其他</strong><span>{{JAR_FILE}} · {{JAR_SIZE}} · 需要先安裝 Java 17 以上</span></div>
-        <a class="button" href="{{JAR_FILE}}" download>下載 .jar</a>
-        <div class="sha">SHA-256 {{JAR_SHA256}}</div>
+        <div class="what"><strong>Windows / macOS / Linux</strong><span>{{NAME}} · {{SIZE}} · 支援斷點續傳</span></div>
+        <a class="button" href="{{NAME}}" download>下載 .zip</a>
+        <div class="sha">SHA-256 {{SHA256}}</div>
       </div>
     </div>
   </section>
 
   <section>
-    <h2>怎麼加入伺服器</h2>
+    <h2>怎麼啟動</h2>
     <ol>
-      <li>打開 HMCL，在「帳戶」新增<strong>離線模式</strong>帳戶，名稱用你自己的（3–16 個英文字母、數字或底線，不能用 <code>Player</code>）。</li>
-      <li>在「下載」安裝遊戲版本 <strong>1.16.5</strong>。HMCL 會自動選擇較快的下載源。</li>
-      <li>啟動 1.16.5 →「多人遊戲」→「新增伺服器」，填入下面的伺服器地址。</li>
-      <li>第一次進入時輸入 <code>/register 密碼 密碼</code> 註冊；之後每次進入輸入 <code>/login 密碼</code>。</li>
+      <li>把整個 zip 解壓縮，從解壓出來的資料夾啟動（<code>web</code> 資料夾要和程式放在一起）。</li>
+      <li><strong>Windows</strong>：雙擊 <code>TeaFabric.exe</code>。第一次如果出現「Windows 已保護您的電腦」，按「其他資訊」→「仍要執行」。</li>
+      <li><strong>macOS</strong>：Apple 晶片用 <code>TeaFabric-mac-apple-silicon</code>，Intel 用 <code>TeaFabric-mac-intel</code>。第一次在 Finder 對它按右鍵 →「打開」。</li>
+      <li><strong>Linux</strong>：在終端機執行 <code>./TeaFabric-linux</code>。</li>
+      <li>程式會用預設瀏覽器打開 <code>http://127.0.0.1:47265/</code>。玩的時候不要關閉它的視窗。瀏覽器需要 Chrome / Edge 119+、Firefox 120+ 或 Safari 18.2+。</li>
     </ol>
   </section>
 
   <section>
-    <h2>伺服器地址</h2>
+    <h2>多人遊戲</h2>
 {{SERVER_BLOCK}}
+    <p>第一次進入時輸入 <code>/register 密碼 密碼</code> 註冊；之後每次進入輸入 <code>/login 密碼</code>。</p>
   </section>
 
   <footer>
-    <p>HMCL（Hello Minecraft! Launcher）依 <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0</a> 授權，
-      原始碼在 <a href="https://github.com/HMCL-dev/HMCL/tree/v{{VERSION}}">github.com/HMCL-dev/HMCL</a>，
-      官方網站 <a href="https://hmcl.huangyuhui.net">hmcl.huangyuhui.net</a>。本頁只是原版檔案的轉載，雜湊值與官方發布一致。</p>
+    <p>下載版的存檔和網站版分開。要搬世界：在世界選單按「編輯」→「打開世界資料夾」會下載成 zip，再把 zip 拖到另一邊的「選擇世界」畫面。</p>
+    <p>這個檔案包含 Minecraft 的程式和素材，請不要公開轉發。</p>
   </footer>
 </main>
 <script>

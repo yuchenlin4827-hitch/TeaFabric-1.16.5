@@ -138,11 +138,15 @@ parts that `boot.js` reassembles (`teavm/classes.wasm.parts.json`). The same Wor
 connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
 (not tested yet; the free plan's CPU limits may cut busy connections).
 
-**Launcher downloads**: the same Worker serves `/download/` without the password: the HMCL launcher
-(open source, GPL-3.0) for people who join the server with the regular Java edition, plus a page
-on joining (offline account, 1.16.5, `/register` and `/login`). The deploy script fetches the current
-release from HMCL's official update channel and checks its SHA-256; it holds no Minecraft content.
-`SERVER_ADDRESS=host:port` puts the server address on that page; `LAUNCHER=0` leaves it out.
+**Downloadable version**: `/download/` (behind the same password) offers the game as a zip for people
+who would rather not load 150 MB from the site every time, e.g. on slow connections. It holds `build/web`
+plus a small launcher (`launcher/`, Go) for Windows, macOS and Linux that serves it on
+`http://127.0.0.1:47265/` and opens the default browser; the port is fixed because the browser keeps
+worlds per address. `scripts/package-desktop.sh` builds it (`build/TeaFabric-1.16.5.zip`, about 55 MB);
+the deploy script uploads it in 24 MiB parts that the Worker joins into one download with Range
+support, so downloads can be resumed. `SERVER_ADDRESS=wss://…` puts the server address on the page and
+in the zip's usage guide; `LAUNCHER=0` leaves the download out. A relay started with `--origin` must
+also allow `http://127.0.0.1:47265` for the downloaded version to join.
 
 ### A server for the web client on Railway
 
@@ -168,7 +172,7 @@ railway add --service minecraft --image itzg/minecraft-server:java17 \
 # add a volume mounted at /data to the minecraft service (dashboard, or the volumeCreate API)
 mkdir relay && cp deploy/railway/relay/package.json proxy/ws-proxy.js relay/ && cd relay
 railway add --service relay --variables 'MC_TARGET=${{minecraft.RAILWAY_PRIVATE_DOMAIN}}:25565' \
-  --variables ALLOWED_ORIGIN=https://<your page's host>
+  --variables ALLOWED_ORIGIN=https://<your page's host>,http://127.0.0.1:47265
 railway up --service relay && railway domain --service relay
 ```
 
