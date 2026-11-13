@@ -17,16 +17,19 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 |---|---|
 | **網頁版**：在瀏覽器裡直接玩 | https://teafabric.teafabric-4107ab.workers.dev/ |
 | **下載版**：Windows / macOS / Linux，下載一次（約 55 MB，可續傳），之後在本機開啟 | https://teafabric.teafabric-4107ab.workers.dev/download/ |
+| **QQ 群** | 1063719613 |
+| **Discord** | https://discord.gg/GGN6TUSdNN |
 
-- 網站有**密碼保護**：頁面包含 Minecraft 的程式和素材，不能公開發布，請向倉庫擁有者索取密碼（使用者名稱隨便填）。
+- 網站有**密碼保護**：頁面包含 Minecraft 的程式和素材，不能公開發布。密碼請在 QQ 群或 Discord 索取（使用者名稱隨便填）。
 - 瀏覽器需要支援 WebAssembly GC：Chrome / Edge 119+、Firefox 120+、Safari 18.2+，建議用電腦（鍵盤加滑鼠）。
 - 網頁版第一次載入約 150 MB；網路慢的話建議用下載版。
 - 進入前要輸入自己的玩家名稱（不能用 `Player`）。多人伺服器的地址寫在下載頁上；第一次進入伺服器時輸入
   `/register 密碼 密碼`，之後每次輸入 `/login 密碼`。
 
-The demo above is password-protected because the page contains Minecraft's code and assets; ask the
-repository owner for access. It needs a browser with WebAssembly GC (Chrome/Edge 119+, Firefox 120+,
-Safari 18.2+). See [Hosting on Cloudflare](#hosting-on-cloudflare-password-protected) to run your own.
+The demo above is password-protected because the page contains Minecraft's code and assets; ask for
+access on [Discord](https://discord.gg/GGN6TUSdNN) or in QQ group 1063719613. It needs a browser with
+WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari 18.2+). See
+[Hosting on Cloudflare](#hosting-on-cloudflare-password-protected) to run your own.
 
 ## Legal
 
