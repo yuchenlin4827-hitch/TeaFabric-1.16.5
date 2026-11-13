@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>下載啟動器</title>
+  <style>
+    :root {
+      --bg: #101418;
+      --panel: #1b2128;
+      --line: #2c343d;
+      --text: #e6e9ec;
+      --muted: #8b949e;
+      --accent: #4caf50;
+      --accent-text: #08120a;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f3f5f7;
+        --panel: #ffffff;
+        --line: #dde2e7;
+        --text: #1b2128;
+        --muted: #5b6570;
+        --accent: #2e7d32;
+        --accent-text: #ffffff;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft JhengHei", "PingFang TC", sans-serif;
+    }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 16px 48px; }
+    h1 { font-size: 26px; margin: 0 0 4px; }
+    h2 { font-size: 18px; margin: 0 0 12px; }
+    p { margin: 0 0 12px; }
+    .lead { color: var(--muted); margin-bottom: 24px; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .files { display: grid; gap: 12px; }
+    .file {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 16px;
+      padding: 12px 0;
+      border-top: 1px solid var(--line);
+    }
+    .file:first-child { border-top: 0; padding-top: 0; }
+    .file .what { flex: 1 1 240px; min-width: 0; }
+    .file .what strong { display: block; }
+    .file .what span { color: var(--muted); font-size: 13px; }
+    .button {
+      display: inline-block;
+      padding: 10px 18px;
+      border-radius: 6px;
+      background: var(--accent);
+      color: var(--accent-text);
+      font-weight: 600;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+    .sha {
+      flex-basis: 100%;
+      font: 12px/1.4 ui-monospace, Consolas, monospace;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    ol { margin: 0; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    code {
+      font: 13px ui-monospace, Consolas, monospace;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 1px 6px;
+      overflow-wrap: anywhere;
+    }
+    .address { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .address code { font-size: 16px; padding: 6px 10px; }
+    .address button {
+      font: inherit;
+      padding: 6px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+    }
+    a { color: var(--accent); }
+    footer { color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>下載啟動器</h1>
+  <p class="lead">用一般的 Minecraft Java 版加入伺服器。這裡轉載的是開源啟動器 HMCL {{VERSION}}，下載速度比 GitHub 快。</p>
+
+  <section>
+    <h2>HMCL {{VERSION}}</h2>
+    <div class="files">
+      <div class="file">
+        <div class="what"><strong>Windows</strong><span>{{EXE_FILE}} · {{EXE_SIZE}}</span></div>
+        <a class="button" href="{{EXE_FILE}}" download>下載 .exe</a>
+        <div class="sha">SHA-256 {{EXE_SHA256}}</div>
+      </div>
+      <div class="file">
+        <div class="what"><strong>macOS / Linux / 其他</strong><span>{{JAR_FILE}} · {{JAR_SIZE}} · 需要先安裝 Java 17 以上</span></div>
+        <a class="button" href="{{JAR_FILE}}" download>下載 .jar</a>
+        <div class="sha">SHA-256 {{JAR_SHA256}}</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>怎麼加入伺服器</h2>
+    <ol>
+      <li>打開 HMCL，在「帳戶」新增<strong>離線模式</strong>帳戶，名稱用你自己的（3–16 個英文字母、數字或底線，不能用 <code>Player</code>）。</li>
+      <li>在「下載」安裝遊戲版本 <strong>1.16.5</strong>。HMCL 會自動選擇較快的下載源。</li>
+      <li>啟動 1.16.5 →「多人遊戲」→「新增伺服器」，填入下面的伺服器地址。</li>
+      <li>第一次進入時輸入 <code>/register 密碼 密碼</code> 註冊；之後每次進入輸入 <code>/login 密碼</code>。</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>伺服器地址</h2>
+{{SERVER_BLOCK}}
+  </section>
+
+  <footer>
+    <p>HMCL（Hello Minecraft! Launcher）依 <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0</a> 授權，
+      原始碼在 <a href="https://github.com/HMCL-dev/HMCL/tree/v{{VERSION}}">github.com/HMCL-dev/HMCL</a>，
+      官方網站 <a href="https://hmcl.huangyuhui.net">hmcl.huangyuhui.net</a>。本頁只是原版檔案的轉載，雜湊值與官方發布一致。</p>
+  </footer>
+</main>
+<script>
+  for (const button of document.querySelectorAll('[data-copy]')) {
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy);
+        button.textContent = '已複製';
+      } catch (e) {
+        button.textContent = '請手動複製';
+      }
+      setTimeout(() => { button.textContent = '複製'; }, 2000);
+    });
+  }
+</script>
+</body>
+</html>

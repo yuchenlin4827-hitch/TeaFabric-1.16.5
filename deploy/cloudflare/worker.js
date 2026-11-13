@@ -6,6 +6,8 @@
 // signed cookie, which WebSocket connections to /relay carry.
 //
 // Multiplayer: in the game, connect to  wss://<this host>/relay?target=mc.example.com:25565
+//
+// /download/ is public: the HMCL launcher (open source) and a page on joining the server with it.
 import { connect } from "cloudflare:sockets";
 
 const COOKIE = "tf_auth";
@@ -19,6 +21,18 @@ export default {
         headers: { "Cache-Control": "no-store" },
       });
     }
+    const url = new URL(request.url);
+    if (url.pathname === "/download") {
+      return Response.redirect(url.origin + "/download/", 301);
+    }
+    if (url.pathname.startsWith("/download/")) {
+      // Plain file names only (no "/", "%" or leading "."), so nothing outside /download/ is reachable.
+      const name = url.pathname.slice("/download/".length);
+      if (!/^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*)?$/.test(name)) {
+        return new Response("Not found", { status: 404 });
+      }
+      return env.ASSETS.fetch(new Request(url.origin + "/download/" + name, request));
+    }
     const token = await authToken(env.AUTH_PASSWORD);
     const viaPassword = await basicAuthOk(request, env.AUTH_PASSWORD);
     if (!viaPassword && cookie(request, COOKIE) !== token) {
@@ -30,7 +44,6 @@ export default {
         },
       });
     }
-    const url = new URL(request.url);
     let response;
     if (url.pathname === "/relay") {
       response = relay(request, url);

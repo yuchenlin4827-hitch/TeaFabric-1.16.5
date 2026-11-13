@@ -138,6 +138,12 @@ parts that `boot.js` reassembles (`teavm/classes.wasm.parts.json`). The same Wor
 connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
 (not tested yet; the free plan's CPU limits may cut busy connections).
 
+**Launcher downloads**: the same Worker serves `/download/` without the password: the HMCL launcher
+(open source, GPL-3.0) for people who join the server with the regular Java edition, plus a page
+on joining (offline account, 1.16.5, `/register` and `/login`). The deploy script fetches the current
+release from HMCL's official update channel and checks its SHA-256; it holds no Minecraft content.
+`SERVER_ADDRESS=host:port` puts the server address on that page; `LAUNCHER=0` leaves it out.
+
 ### A server for the web client on Railway
 
 A 1.16.5 server that the page can join, on [Railway](https://railway.com) (Hobby plan): Paper 1.16.5 from
