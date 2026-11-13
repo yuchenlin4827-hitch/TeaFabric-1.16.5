@@ -119,6 +119,25 @@ Useful properties: `-PteavmFast=true` (fast dependency analysis), `-PteavmOpt=SI
 `-PteavmDeobfuscation=false`, `-PteavmHeap=8g` (compiler JVM heap), `-PteavmMaxHeap=1024` (Wasm heap, MiB),
 `-PteavmTarget=js` (TeaVM JavaScript backend instead of Wasm GC), `-PwebLanguages=all` or `=zh_tw,ja_jp`.
 
+### Hosting on Cloudflare (password-protected)
+
+`scripts/deploy-cloudflare.sh` uploads `build/web` to a Cloudflare Worker (free plan is enough) that only
+serves it to people who know the password, since the page contains Minecraft's code and assets and must
+not be public. Log in once with `npx wrangler login` (`--device` in containers) or set
+`CLOUDFLARE_API_TOKEN`, then:
+
+```bash
+scripts/deploy-cloudflare.sh                 # prints a generated password on the first run
+PASSWORD=... scripts/deploy-cloudflare.sh    # change the password
+WORKER_NAME=my-mc scripts/deploy-cloudflare.sh
+```
+
+The browser asks for the password once (any user name); a signed cookie then keeps you in for 30 days.
+`classes.wasm` (about 105 MB) is over Cloudflare's 25 MiB per-file limit, so it is uploaded in 24 MiB
+parts that `boot.js` reassembles (`teavm/classes.wasm.parts.json`). The same Worker relays multiplayer
+connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
+(not tested yet; the free plan's CPU limits may cut busy connections).
+
 ## Multiplayer
 
 A web page cannot open TCP connections, so the game connects to servers through a small

@@ -328,24 +328,60 @@
   async function fetchWithProgress(url, label, weight, base) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(url + ': HTTP ' + response.status);
+    // A compressing host (Cloudflare) sends the compressed length, or none: then progress is approximate.
     const total = +response.headers.get('Content-Length') || 0;
-    if (!response.body || !total) {
+    if (!response.body) {
       const buf = await response.arrayBuffer();
       setStatus(label, base + weight);
       return buf;
     }
     const reader = response.body.getReader();
-    const out = new Uint8Array(total);
+    const chunks = [];
     let received = 0;
     for (;;) {
       const r = await reader.read();
       if (r.done) break;
-      out.set(r.value, received);
+      chunks.push(r.value);
       received += r.value.length;
-      setStatus(label + ' ' + Math.round(received / 1048576) + ' / ' + Math.round(total / 1048576) + ' MiB',
-        base + weight * received / total);
+      const mib = Math.round(received / 1048576);
+      setStatus(label + ' ' + mib + (total ? ' / ' + Math.round(total / 1048576) : '') + ' MiB',
+        base + weight * (total ? Math.min(1, received / total) : 0.5));
     }
+    const out = new Uint8Array(received);
+    let offset = 0;
+    for (const c of chunks) { out.set(c, offset); offset += c.length; }
+    setStatus(label, base + weight);
     return out.buffer;
+  }
+
+  // Hosts with a per-file size limit (Cloudflare: 25 MiB) get classes.wasm in parts, listed in
+  // teavm/classes.wasm.parts.json (scripts/deploy-cloudflare.sh). The runtime fetches teavm/classes.wasm
+  // itself (stack traces use the same path), so that one request is answered with the reassembled module.
+  async function loadSplitWasm(base, weight) {
+    let manifest = null;
+    try {
+      const r = await fetch('teavm/classes.wasm.parts.json', { cache: 'no-cache' });
+      if (r.ok) manifest = await r.json();
+    } catch (e) {
+      // not split
+    }
+    if (!manifest || !manifest.parts) return false;
+    const parts = [];
+    const n = manifest.parts.length;
+    for (let i = 0; i < n; i++) {
+      parts.push(await fetchWithProgress('teavm/' + manifest.parts[i], 'Downloading game code (' + (i + 1) + '/' + n + ')',
+        weight / n, base + weight * i / n));
+    }
+    const wasm = new Blob(parts, { type: 'application/wasm' });
+    const realFetch = window.fetch;
+    window.fetch = function (input, init) {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (/(^|\/)teavm\/classes\.wasm$/.test(url)) {
+        return Promise.resolve(new Response(wasm, { headers: { 'Content-Type': 'application/wasm' } }));
+      }
+      return realFetch.apply(this, arguments);
+    };
+    return true;
   }
 
   // Optionally compile without the native "js-string" builtins (TeaVM then uses JS fallbacks).
@@ -449,8 +485,9 @@
     }
     try {
       const storeReady = tf.store.init();
-      tf.archives['/classpath'] = await fetchWithProgress('data/classpath.zip', 'Downloading game resources', 0.35, 0);
-      tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.15, 0.35);
+      tf.archives['/classpath'] = await fetchWithProgress('data/classpath.zip', 'Downloading game resources', 0.2, 0);
+      tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.1, 0.2);
+      await loadSplitWasm(0.3, 0.2);
       await storeReady;
       setStatus('Compiling WebAssembly…', 0.55);
       const teavm = await TeaVM.wasmGC.load('teavm/classes.wasm', {

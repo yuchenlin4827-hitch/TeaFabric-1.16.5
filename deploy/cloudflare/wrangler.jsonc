@@ -1,0 +1,13 @@
+// Cloudflare Worker for TeaFabric; scripts/deploy-cloudflare.sh copies this next to the prepared assets.
+{
+  "name": "teafabric",
+  "main": "worker.js",
+  "compatibility_date": "2025-10-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // Every request goes through the Worker first, so nothing is served without the password.
+    "run_worker_first": true
+  },
+  "observability": { "enabled": true }
+}
