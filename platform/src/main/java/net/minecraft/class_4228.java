@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import javax.sound.sampled.AudioFormat;
 import org.lwjgl.BufferUtils;
 import teafabric.web.audio.WebSound;
+import teafabric.web.log.LogSink;
 
 /**
  * Browser replacement for Minecraft's OggAudioStream, which decodes with stb_vorbis. The platform layer
@@ -19,8 +20,19 @@ public class class_4228 implements class_4234 {
     private int frame;
 
     public class_4228(InputStream in) throws IOException {
-        sound = WebSound.load(in);
-        format = new AudioFormat(sound.sampleRate(), 16, sound.channels(), true, false);
+        WebSound loaded = null;
+        try {
+            loaded = WebSound.load(in);
+            format = new AudioFormat(loaded.sampleRate(), 16, loaded.channels(), true, false);
+        } catch (IOException | RuntimeException | Error e) {
+            // SoundLoader runs this in a CompletableFuture, which would drop the exception silently.
+            LogSink.log(2, "WARN", "Sound", "Cannot load sound", e);
+            if (loaded != null) {
+                loaded.release();
+            }
+            throw e;
+        }
+        sound = loaded;
     }
 
     /** getFormat */
@@ -42,13 +54,18 @@ public class class_4228 implements class_4234 {
     }
 
     private ByteBuffer read(int maxFrames) {
-        int count = Math.max(0, Math.min(maxFrames, sound.frames() - frame));
-        ByteBuffer buffer = BufferUtils.createByteBuffer(count * 2 * sound.channels());
-        if (count > 0) {
-            sound.copyPcm16(frame, count, buffer);
-            frame += count;
+        try {
+            int count = Math.max(0, Math.min(maxFrames, sound.frames() - frame));
+            ByteBuffer buffer = BufferUtils.createByteBuffer(count * 2 * sound.channels());
+            if (count > 0) {
+                sound.copyPcm16(frame, count, buffer);
+                frame += count;
+            }
+            return buffer;
+        } catch (RuntimeException | Error e) {
+            LogSink.log(2, "WARN", "Sound", "Cannot read decoded sound", e);
+            throw e;
         }
-        return buffer;
     }
 
     @Override
