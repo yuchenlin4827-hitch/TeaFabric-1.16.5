@@ -9,7 +9,6 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.ZipEntry;
@@ -81,7 +80,7 @@ public final class DesktopCompat {
                 }
                 download(file.getName() + ".zip", Int8Array.copyFromJavaArray(zip(file)));
             } else if (file.isFile()) {
-                download(file.getName(), Int8Array.copyFromJavaArray(Files.readAllBytes(file.toPath())));
+                download(file.getName(), Int8Array.copyFromJavaArray(readFile(file)));
             } else {
                 LogSink.log(2, "WARN", "Desktop", "Nothing to open at " + file, null);
             }
@@ -108,7 +107,7 @@ public final class DesktopCompat {
                 addToZip(zip, child, prefix + child.getName() + "/");
             } else if (!child.getName().equals("session.lock")) {
                 zip.putNextEntry(new ZipEntry(prefix + child.getName()));
-                zip.write(Files.readAllBytes(child.toPath()));
+                zip.write(readFile(child));
                 zip.closeEntry();
             }
         }
@@ -148,7 +147,7 @@ public final class DesktopCompat {
     }
 
     private static String importWorld(File zipFile) throws IOException {
-        byte[] data = Files.readAllBytes(zipFile.toPath());
+        byte[] data = readFile(zipFile);
         // The world is the folder holding level.dat: the zip root or one folder down.
         String root = null;
         try (ZipInputStream in = new ZipInputStream(new java.io.ByteArrayInputStream(data))) {

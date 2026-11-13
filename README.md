@@ -144,9 +144,22 @@ log in to Microsoft accounts or reach Mojang's session servers.
 ## Singleplayer
 
 Singleplayer runs Minecraft's own integrated server inside the page, on green threads next to the
-client: Singleplayer → Create New World works as usual. Generating the spawn area (441 chunks) takes
-about 2½ minutes in headless Chromium with software rendering; the loading screen keeps updating
-meanwhile. What makes it work:
+client: Singleplayer → Create New World works as usual.
+
+* **Worlds are kept** in the browser's storage (IndexedDB), with the options, the server list, config
+  and resource packs: files are written back a few seconds after the game saves them (Minecraft saves
+  a world when the game is paused and when it is left, so use *Save and Quit* or pause before closing
+  the tab). `?nopersist` starts without saved data and keeps nothing; `?resetstorage` deletes it first.
+  Clearing the site's data in the browser removes it too.
+* **Smaller spawn area**: vanilla generates 21×21 chunks around the spawn before a new world opens and
+  keeps them loaded forever. In the page the radius is 5 (9×9 chunks) by default, which brings world
+  creation from about 160 s to about 55 s (headless Chromium, software WebGL) and leaves the server less
+  to tick; `?spawnRadius=11` restores vanilla behaviour (1–11).
+* **Backups / moving worlds**: *Open World Folder* (Edit World) downloads the world as a zip, *Make
+  Backup* followed by *Open Backups Folder* downloads the backup; other "Open … Folder" buttons work the
+  same way and web links open in a new tab. Dropping a world zip on the Select World screen imports it.
+
+How it works:
 
 * the client and the integrated server talk over a pair of in-memory Netty channels (Netty's local
   transport needs event-loop threads), pumped once per frame;
@@ -157,13 +170,10 @@ meanwhile. What makes it work:
   `Deflater` accepts `Z_BUF_ERROR`, `Files.newByteChannel`, multi-dimensional `Array.newInstance`;
 * the server's RSA key pair is skipped (only online-mode logins over the network use it).
 
-Tested: create a world, spawn, walk, F3 (`Integrated server @ … ms ticks`), pause menu, world icon
-saved. Measured in headless Chromium with SwiftShader (software WebGL, 4 cores): spawn area ≈160 s,
-about 6 fps while playing, server ticks ≈200 ms instead of 50 ms (the client and the server share one
-browser thread). A real GPU helps the frame rate; the server stays several times slower than on a JVM.
-
-Limits: the game directory, worlds included, lives in memory, so worlds are gone when the page is
-reloaded (saving to IndexedDB is not implemented yet); "Open to LAN" is impossible in a browser.
+Performance (headless Chromium, SwiftShader software WebGL, 4 cores): about 6 fps while playing and
+server ticks of roughly 200 ms instead of 50 ms with the vanilla spawn area — the client and the server
+share one browser thread. A real GPU helps the frame rate; a lower render distance helps both.
+"Open to LAN" is impossible in a browser.
 
 ## Mods
 
@@ -251,7 +261,7 @@ Not working yet / known issues:
   `--wasm-tier-up-filter`, fixed by the function splitters above. Strict mode stays enabled because
   null dereferences relying on engine traps crash Chromium (reproduced with a 10-line TeaVM program).
 * Sounds: Ogg Vorbis decoding is not wired up yet (`.ogg` assets are not packaged).
-* No world persistence (IndexedDB) yet: singleplayer worlds and settings are lost on reload.
+* Singleplayer is slow: the integrated server shares the page's only thread with the client.
 * Multiplayer needs a WebSocket ↔ TCP proxy (browsers cannot open TCP sockets); online-mode
   authentication is not available.
 * Performance work (optimisation level, uniform caching, streaming buffers) has not started.
