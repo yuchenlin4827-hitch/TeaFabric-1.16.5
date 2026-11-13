@@ -93,3 +93,11 @@ viaversion.xyz.wagyourtail.jvmdg.j11.stub.java_base.J_U_Optional isEmpty (Ljava/
 viaversion.xyz.wagyourtail.jvmdg.j16.stub.java_base.J_U_S_Stream toList (Ljava/util/stream/Stream;)Ljava/util/List; -> teafabric.web.compat.LangCompat
 viaversion.xyz.wagyourtail.jvmdg.j9.stub.java_base.J_L_Runtime version ()Lviaversion/xyz/wagyourtail/jvmdg/j9/stub/java_base/J_L_Runtime$Version; -> teafabric.web.compat.LangCompat#runtimeVersion()Ljava/lang/Object;
 viaversion.xyz.wagyourtail.jvmdg.j10.stub.java_base.J_L_Runtime$Version feature (Lviaversion/xyz/wagyourtail/jvmdg/j9/stub/java_base/J_L_Runtime$Version;)I -> teafabric.web.compat.LangCompat#runtimeFeatureVersion(Ljava/lang/Object;)I
+# ViaVersion calls Netty codecs through reflective method handles.
+com.viaversion.viaversion.util.PipelineUtil privateHandleUnchecked (Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle; -> teafabric.web.compat.InvokeCompat
+com.viaversion.viaversion.util.PipelineUtil callDecode (Lio/netty/handler/codec/ByteToMessageDecoder;Lio/netty/channel/ChannelHandlerContext;Ljava/lang/Object;)Ljava/util/List; -> io.netty.handler.codec.TeaFabricCodecs
+com.viaversion.viaversion.util.PipelineUtil callEncode (Lio/netty/handler/codec/MessageToByteEncoder;Lio/netty/channel/ChannelHandlerContext;Ljava/lang/Object;Lio/netty/buffer/ByteBuf;)V -> io.netty.handler.codec.TeaFabricCodecs
+com.viaversion.viaversion.util.PipelineUtil callDecode (Lio/netty/handler/codec/MessageToMessageDecoder;Lio/netty/channel/ChannelHandlerContext;Ljava/lang/Object;)Ljava/util/List; -> io.netty.handler.codec.TeaFabricCodecs
+# ViaVersion's update check: a cross-origin request the page is not allowed to make.
+com.viaversion.viaversion.update.UpdateUtil sendUpdateMessage ()V -> teafabric.web.compat.LangCompat#ignore()V
+com.viaversion.viaversion.update.UpdateUtil sendUpdateMessage (Lcom/viaversion/viaversion/api/connection/UserConnection;)V -> teafabric.web.compat.LangCompat#ignore(Ljava/lang/Object;)V

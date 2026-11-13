@@ -35,6 +35,10 @@ public abstract class TFileChannel implements SeekableByteChannel {
                     || options.contains(StandardOpenOption.CREATE_NEW))) {
                 throw new java.nio.file.NoSuchFileException(path.toString());
             }
+            // TeaVM's RandomAccessFile does not create files; CREATE / CREATE_NEW do (session.lock, region files).
+            if (!file.createNewFile() && !file.exists()) {
+                throw new java.nio.file.NoSuchFileException(path.toString());
+            }
         } else if (options.contains(StandardOpenOption.CREATE_NEW)) {
             throw new java.nio.file.FileAlreadyExistsException(path.toString());
         }

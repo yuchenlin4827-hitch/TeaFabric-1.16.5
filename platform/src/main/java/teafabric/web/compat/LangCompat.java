@@ -53,8 +53,11 @@ public final class LangCompat {
 
     // ---- Class
 
-    /** Redirect target that drops a call (see redirects.txt). */
+    /** Redirect targets that drop a call (see redirects.txt). */
     public static void ignore(Object receiver) {
+    }
+
+    public static void ignore() {
     }
 
     // ---- Java 9-16 APIs as called by mods downgraded to Java 8 with JvmDowngrader ("jvmdg" stubs). Their
