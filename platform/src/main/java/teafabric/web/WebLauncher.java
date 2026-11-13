@@ -120,6 +120,7 @@ final class WebLauncher {
                 autoConnect());
 
         Thread.currentThread().setName("Render thread");
+        teafabric.web.compat.MinecraftCompat.renderThread = Thread.currentThread();
         phase("RenderSystem.initRenderThread", RenderSystem::initRenderThread);
         phase("RenderSystem.beginInitialization", RenderSystem::beginInitialization);
         class_310[] client = new class_310[1];
