@@ -43,6 +43,7 @@ public final class Boot {
         new File(WebFileSystem.GAME_DIR + "/config").mkdirs();
         // Worlds, options and the server list from earlier visits (IndexedDB), then keep saving changes.
         teafabric.web.vfs.WebPersistence.restore();
+        teafabric.web.vfs.DefaultServers.apply();
         teafabric.web.vfs.WebPersistence.start();
     }
 
