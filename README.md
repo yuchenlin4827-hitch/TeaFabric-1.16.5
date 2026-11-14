@@ -15,8 +15,8 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 
 | | |
 |---|---|
-| **網頁版**：在瀏覽器裡直接玩 | https://teafabric.teafabric-4107ab.workers.dev/ |
-| **下載版**：Windows / macOS / Linux，下載一次（約 140 MB，可續傳），之後在本機開啟 | https://teafabric.teafabric-4107ab.workers.dev/download/ |
+| **網頁版**：在瀏覽器裡直接玩（第一次約下載 40 MB，之後只下載更新的部分） | https://teafabric.teafabric-871743.workers.dev/ |
+| **下載版**：Windows / macOS / Linux，下載一次（約 133 MB，可續傳），之後在本機開啟 | https://teafabric.teafabric-871743.workers.dev/download/ |
 | **QQ 群** | 1063719613 |
 | **Discord** | https://discord.gg/GGN6TUSdNN |
 
@@ -167,8 +167,9 @@ The browser asks for the password once (any user name); a signed cookie then kee
 Cloudflare does not compress these files, so the deploy stores the large ones gzip-compressed under
 content-hashed names in `c/` (in parts below the 25 MiB file limit), listed in `files.json`; `boot.js`
 downloads them with progress and decompresses them natively (`DecompressionStream`). A first visit
-downloads about 36 MB instead of about 110 MB, and the Worker lets browsers keep `c/`, `sounds/` and
-`lang/` for a year, so later visits download only what a new build changed. The same Worker relays multiplayer
+downloads about 40 MB instead of about 147 MB, and the Worker lets browsers keep `c/`, `sounds/` and
+`lang/` for a year, so later visits download only what a new build changed (tested: a second visit
+fetched none of the large files again). The same Worker relays multiplayer
 connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
 (not tested yet; the free plan's CPU limits may cut busy connections).
 
