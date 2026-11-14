@@ -230,9 +230,11 @@
 
   /**
    * Converts a program. attribLocations: name -> location from glBindAttribLocation (others are assigned
-   * after the highest one). Returns the two Vulkan GLSL sources and the reflection the WebGPU layer needs.
+   * after the highest one). attribClasses: location -> 'i' or 'u' for attributes fed integer data without
+   * normalisation (OpenGL converts those to float; WebGPU needs an integer input, converted here).
+   * Returns the two Vulkan GLSL sources and the reflection the WebGPU layer needs.
    */
-  function convertProgram(vsSrc, fsSrc, attribLocations) {
+  function convertProgram(vsSrc, fsSrc, attribLocations, attribClasses) {
     const vs = parseStage(vsSrc, 'vertex');
     const fs = parseStage(fsSrc, 'fragment');
     const defines = vs.defines.concat(fs.defines);
@@ -298,13 +300,28 @@
       + (o.flat ? 'flat ' : '') + dir + ' ' + o.type + ' ' + o.name + (o.array != null ? '[' + o.array + ']' : '') + ';\n';
 
     const head = '#version 450\n' + defines.join('\n') + '\n' + blockDecl;
+    const classes = attribClasses || {};
+    let attribDecls = '';
+    let attribInit = '';
+    for (const a of attribs) {
+      const cls = classes[a.location];
+      if (cls === 'i' || cls === 'u') {
+        const n = /^vec([234])$/.exec(a.type);
+        const itype = n ? (cls === 'i' ? 'ivec' : 'uvec') + n[1] : cls === 'i' ? 'int' : 'uint';
+        attribDecls += 'layout(location = ' + a.location + ') in ' + itype + ' tf_attr' + a.location + ';\n'
+          + a.type + ' ' + a.name + ';\n';
+        attribInit += '  ' + a.name + ' = ' + a.type + '(tf_attr' + a.location + ');\n';
+      } else {
+        attribDecls += 'layout(location = ' + a.location + ') in ' + a.type + ' ' + a.name + ';\n';
+      }
+    }
     let vcode = vs.other.join('\n');
     vcode = samplerUses(vcode.replace(/\bvoid\s+main\s*\(\s*(void)?\s*\)/, 'void tf_userMain()'), vs);
     const vout = head
-      + attribs.map((a) => 'layout(location = ' + a.location + ') in ' + a.type + ' ' + a.name + ';\n').join('')
+      + attribDecls
       + vs.outputs.map((o) => vary(o, 'out')).join('')
       + samplerDecls(vs) + vcode
-      + '\nvoid main() {\n  tf_userMain();\n  gl_Position.y *= tf_flipY;\n'
+      + '\nvoid main() {\n' + attribInit + '  tf_userMain();\n  gl_Position.y *= tf_flipY;\n'
       + '  gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n}\n';
 
     let fcode = samplerUses(fs.other.join('\n'), fs);

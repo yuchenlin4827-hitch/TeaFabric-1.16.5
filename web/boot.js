@@ -79,8 +79,12 @@
     } });
   }
 
+  // ?webgpu: render through WebGPU (webgpu/webgpu-gl.js, a WebGL 2 context on WebGPU); set up in start().
+  let webgpu = null;
+
   tf.createGL = function () {
     if (params.has('nogl')) { overlay.classList.add('hidden'); return stubGL(); }
+    if (webgpu) { overlay.classList.add('hidden'); return webgpu.createContext(); }
     const gl = canvas.getContext('webgl2', {
       alpha: false, depth: true, stencil: true, antialias: false,
       premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance'
@@ -649,6 +653,16 @@
 
   let wasmExports = null;
 
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error('Cannot load ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+
   async function start() {
     if (typeof WebAssembly !== 'object' || !TeaVM || !TeaVM.wasmGC) {
       fail('This browser does not support WebAssembly.');
@@ -667,6 +681,18 @@
       tf.archives['/classpath'] = await download('data/classpath.zip', 'Downloading game resources', 0.15, 0);
       tf.archives['/minecraft/assets'] = await download('data/assets.zip', 'Downloading assets', 0.15, 0.15);
       await download('teavm/classes.wasm', 'Downloading game code', 0.2, 0.3);
+      if (params.has('webgpu')) {
+        try {
+          setStatus('Starting WebGPU…', 0.5);
+          await loadScript('webgpu/glsl-vk.js');
+          await loadScript('webgpu/webgpu-gl.js');
+          const info = await TFWebGPU.init(canvas);
+          webgpu = TFWebGPU;
+          console.info('[TeaFabric] Rendering with WebGPU: ' + info);
+        } catch (e) {
+          console.warn('[TeaFabric] WebGPU is not available, using WebGL 2: ' + (e && e.message ? e.message : e));
+        }
+      }
       await storeReady;
       if (!tf.config.username) {
         setStatus('Enter a player name to start.', 0.5);
@@ -679,6 +705,7 @@
           // Frame pacing for glfwSwapBuffers (see WebWindow.waitForFrame).
           imports.teafabricFrame = {
             request: function () {
+              if (webgpu) webgpu.endFrame(); // submit the frame's WebGPU commands
               requestAnimationFrame(function () { wasmExports.teafabricFrameReady(); });
             }
           };

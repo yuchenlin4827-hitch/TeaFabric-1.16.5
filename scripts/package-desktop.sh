@@ -22,6 +22,13 @@ rm -rf "$ROOT/build/desktop" "$ZIP"
 mkdir -p "$STAGE/web/teavm"
 # The page, the runtime and the data archives; not the test pages (build/web/mini*).
 cp build/web/index.html build/web/boot.js build/web/style.css "$STAGE/web/"
+# The WebGPU renderer (?webgpu): the WebGL-on-WebGPU layer, the shader converter and naga (shader translator).
+if [ -d build/web/webgpu ]; then
+  mkdir -p "$STAGE/web/webgpu/naga"
+  cp build/web/webgpu/webgpu-gl.js build/web/webgpu/glsl-vk.js "$STAGE/web/webgpu/"
+  cp build/web/webgpu/naga/naga.js build/web/webgpu/naga/naga_bg.wasm build/web/webgpu/naga/LICENSE-* \
+    build/web/webgpu/naga/README.txt "$STAGE/web/webgpu/naga/"
+fi
 cp -r build/web/data "$STAGE/web/"
 cp build/web/teavm/* "$STAGE/web/teavm/"
 # Every language (47 MB, about 12 MB zipped); the page loads the chosen one.
