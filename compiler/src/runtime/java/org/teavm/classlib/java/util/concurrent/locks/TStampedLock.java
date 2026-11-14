@@ -1,14 +1,16 @@
-package java.util.concurrent.locks;
+package org.teavm.classlib.java.util.concurrent.locks;
 
 import java.util.concurrent.TimeUnit;
 
 /**
- * StampedLock for the browser build, which TeaVM's class library lacks (Phosphor's light engine uses it).
+ * java.util.concurrent.locks.StampedLock, which TeaVM's class library lacks (Phosphor's light engine
+ * uses it). It lives here, under the class library's naming, because the class library's name for a
+ * java.* class takes precedence over a class of the plain name elsewhere on the class path.
  * Threads here are green threads that only switch at blocking calls, so the lock never needs to park: a
  * contended acquire yields until the lock is free. Stamps follow the JDK contract: never zero, and an
  * optimistic read stamp stops validating once a write lock has been taken.
  */
-public class StampedLock implements java.io.Serializable {
+public class TStampedLock implements java.io.Serializable {
     private static final long serialVersionUID = -6001602636862214147L;
 
     /** Increases when a write lock is taken and again when it is released. */
@@ -16,7 +18,7 @@ public class StampedLock implements java.io.Serializable {
     private boolean writing;
     private int readers;
 
-    public StampedLock() {
+    public TStampedLock() {
     }
 
     public long writeLock() {
