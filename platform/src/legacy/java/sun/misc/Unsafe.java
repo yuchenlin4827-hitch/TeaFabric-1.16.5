@@ -101,4 +101,43 @@ public final class Unsafe {
     public int pageSize() {
         return 4096;
     }
+
+    // Raw memory access, referenced by Sodium's Unsafe vertex writers. Sodium only uses them when it found
+    // Unsafe through the theUnsafe field, which does not exist here, so it takes its NIO writers instead.
+
+    public void putFloat(long address, float x) {
+        throw unsupported();
+    }
+
+    public void putInt(long address, int x) {
+        throw unsupported();
+    }
+
+    public void putShort(long address, short x) {
+        throw unsupported();
+    }
+
+    public void putByte(long address, byte x) {
+        throw unsupported();
+    }
+
+    public void putLong(long address, long x) {
+        throw unsupported();
+    }
+
+    public float getFloat(long address) {
+        throw unsupported();
+    }
+
+    public int getInt(long address) {
+        throw unsupported();
+    }
+
+    public void copyMemory(Object src, long srcOffset, Object dst, long dstOffset, long bytes) {
+        throw unsupported();
+    }
+
+    public void copyMemory(long srcAddress, long dstAddress, long bytes) {
+        throw unsupported();
+    }
 }
