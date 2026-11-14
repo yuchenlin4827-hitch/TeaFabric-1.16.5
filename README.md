@@ -378,6 +378,13 @@ involved while baking; `SodiumCompat` and the WebGL emulation do the rest):
   flowers had solid backgrounds); fog and other state Sodium reads back from GL is answered by the
   emulation; its video settings no longer offer Fabulous!; its F3 memory line shows the JavaScript heap.
   Sodium finds no `sun.misc.Unsafe` and uses its NIO vertex writers.
+* **World generation** runs on Minecraft's worker pool, which is green threads here. With Lithium, a task
+  sometimes waited for a task queued behind it on the same thread, and about one new world in six stopped
+  at "Preparing spawn area" for good (both the worker and the server thread waiting in `CompletableFuture`,
+  found with `?waits`). Every untimed wait in the concurrency shims reports to the pool, which starts
+  another thread (up to 8) when all of its threads wait inside tasks while tasks are queued, as a JVM's
+  pool would have a free thread. In 12 new worlds afterwards, all were ready in 22–28 s; the extra thread
+  was needed in 3 of them.
 
 Measured in headless Chromium with software rendering (SwiftShader), the same build with and without the
 four mods, a new random world each run:
