@@ -351,6 +351,43 @@ What does work without a rebuild:
 Rebuilding after adding jars to `./mods` takes about 15–25 minutes (bake + TeaVM + packaging), and
 the result is a new static `build/web` directory to serve.
 
+### Optimization mods
+
+Sodium 0.2.0, Lithium 0.6.6, Phosphor 0.8.0 and FerriteCore 2.1.1 (the 1.16.5 jars, in `./mods`) run in
+the browser build. Each relied on something a browser build does not have; the build adapts them
+automatically, and only when the mod is present (`baker/.../ModCompat.java` rewrites the few methods
+involved while baking; `SodiumCompat` and the WebGL emulation do the rest):
+
+* **FerriteCore** defines two classes inside Guava's package at run time and calls through method handles
+  (its compact block state property map, the block state cache); its config reaches its file handler
+  through reflection. The classes are defined at build time and the calls are direct.
+* **Lithium**: its initializer checked a config that its mixin plugin (which runs at build time here) fills;
+  that check is dropped. It asks entity classes whether they override two collision methods
+  (`getDeclaredMethod`); those methods keep reflection metadata (`TeaFabricReflection`).
+* **Phosphor** uses `StampedLock`, which TeaVM's class library lacks: added for green threads
+  (`compiler/src/runtime`).
+* **Sodium** renders with its *Oneshot* backend (one draw per chunk section; its multi-draw backend needs
+  OpenGL 4.3 indirect draws, which WebGL 2 does not have) through the emulation's vertex array objects.
+  Its chunk meshing runs on one worker green thread that lets the page draw a frame every 6 ms (with a
+  thread per core, all sharing the page's one thread, no frame was drawn until every chunk was built).
+  WebGL has no alpha test, so the GLSL translator adds it to every fragment shader (leaves, grass and
+  flowers had solid backgrounds); fog and other state Sodium reads back from GL is answered by the
+  emulation; its video settings no longer offer Fabulous!; its F3 memory line shows the JavaScript heap.
+  Sodium finds no `sun.misc.Unsafe` and uses its NIO vertex writers.
+
+Measured in headless Chromium with software rendering, the same build with and without the four mods
+(two runs each, a new random world each run): a new world was ready 22–24 s after Create World with the
+mods, 46–47 s without. Frame rates 20 s after joining varied more between random worlds (2.9–6.5 fps either way) than between the builds, because chunks were still loading.
+
+**Iris (shader packs) does not work** and is not a matter of adapting the mod: shader packs are written for
+desktop OpenGL's compatibility profile (built-in matrices and vertex inputs such as `gl_ModelViewMatrix`
+and `gl_Vertex`, up to eight render targets, shadow maps, and in newer packs compute shaders and image
+load/store), while WebGL 2 runs GLSL ES 3.00 without any of the built-ins, compute shaders or image access.
+Every pack would need a translator for all of that, and a pack renders the world a second time for its
+shadow map and adds a dozen full-screen passes per frame, on a page that already spends most of its
+frame in Minecraft's own code. WebGPU would not change this: it has no compatibility profile either, needs
+its own shading language (WGSL), and is missing on many of the older devices this is played on.
+
 ### Server protocol: 1.12.2 / 1.16.5 (ViaFabric)
 
 With [ViaFabric](https://modrinth.com/mod/viafabric) 0.4.x (it includes ViaVersion) in `./mods`, the
