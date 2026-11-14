@@ -32,6 +32,70 @@ final class ModCompat {
 
     static void apply(Map<String, byte[]> classes, Map<String, byte[]> resources) {
         ferriteCore(classes, resources);
+        lithium(classes);
+        sodium(classes);
+    }
+
+    /**
+     * Sodium's video settings cycle through every graphics mode, Fabulous! included, which the WebGL
+     * emulation cannot render (vanilla's screen is limited to Fast and Fancy by GraphicsCompat). Its
+     * CyclingControl shows names by ordinal but cycles through allowedValues, so that list is filtered by
+     * SodiumCompat.allowedValues after the constructor filled it.
+     */
+    private static void sodium(Map<String, byte[]> classes) {
+        String control = "me/jellysquid/mods/sodium/client/gui/options/control/CyclingControl";
+        if (!classes.containsKey(control)) {
+            return;
+        }
+        patch(classes, control, node -> {
+            MethodNode init = method(node, "<init>", "(Lme/jellysquid/mods/sodium/client/gui/options/Option;"
+                    + "Ljava/lang/Class;[Ljava/lang/String;)V");
+            if (init == null) {
+                return false;
+            }
+            AbstractInsnNode ret = null;
+            for (AbstractInsnNode insn = init.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn.getOpcode() == Opcodes.RETURN) {
+                    if (ret != null) {
+                        return false; // expected a single return
+                    }
+                    ret = insn;
+                }
+            }
+            if (ret == null) {
+                return false;
+            }
+            InsnList filter = new InsnList();
+            filter.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            filter.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            filter.add(new FieldInsnNode(Opcodes.GETFIELD, control, "allowedValues", "[Ljava/lang/Enum;"));
+            filter.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "teafabric/web/compat/SodiumCompat", "allowedValues",
+                    "([Ljava/lang/Enum;)[Ljava/lang/Enum;", false));
+            filter.add(new FieldInsnNode(Opcodes.PUTFIELD, control, "allowedValues", "[Ljava/lang/Enum;"));
+            init.instructions.insertBefore(ret, filter);
+            return true;
+        });
+    }
+
+    /**
+     * Lithium's mixin plugin loads lithium.properties and stores it in LithiumMod.CONFIG; its initializer
+     * fails when that did not happen. The plugin runs here at build time (it decides which mixins are baked
+     * in), not in the browser, and nothing else reads CONFIG, so the check is dropped.
+     */
+    private static void lithium(Map<String, byte[]> classes) {
+        String mod = "me/jellysquid/mods/lithium/common/LithiumMod";
+        if (classes.containsKey(mod)) {
+            patch(classes, mod, node -> {
+                MethodNode init = method(node, "onInitialize", "()V");
+                if (init == null) {
+                    return false;
+                }
+                InsnList code = new InsnList();
+                code.add(new InsnNode(Opcodes.RETURN));
+                replace(init, code);
+                return true;
+            });
+        }
     }
 
     /**
