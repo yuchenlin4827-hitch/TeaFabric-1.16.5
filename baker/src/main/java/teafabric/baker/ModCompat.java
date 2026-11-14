@@ -34,6 +34,37 @@ final class ModCompat {
         ferriteCore(classes, resources);
         lithium(classes);
         sodium(classes);
+        slightGuiModifications(classes);
+    }
+
+    /**
+     * Slight GUI Modifications runs config/slightguimodifications/cts.groovy (custom title screen elements, off by
+     * default) with an embedded Groovy, which generates classes at run time and cannot run here. Loading the
+     * script becomes a no-op and the Groovy shell is never created, so none of Groovy is compiled in (about
+     * 3,300 classes); the mod's other features are unaffected.
+     */
+    private static void slightGuiModifications(Map<String, byte[]> classes) {
+        String registry = "me/shedaniel/slightguimodifications/gui/cts/CtsRegistry";
+        if (!classes.containsKey(registry)) {
+            return;
+        }
+        patch(classes, registry, node -> {
+            int done = 0;
+            for (MethodNode m : node.methods) {
+                InsnList code = new InsnList();
+                if ((m.name.equals("loadScripts") || m.name.equals("loadScriptsAsync")) && m.desc.equals("()V")) {
+                    code.add(new InsnNode(Opcodes.RETURN));
+                } else if (m.name.startsWith("lambda$") && m.desc.equals("()Lgroovy/lang/GroovyShell;")) {
+                    code.add(new InsnNode(Opcodes.ACONST_NULL));
+                    code.add(new InsnNode(Opcodes.ARETURN));
+                } else {
+                    continue;
+                }
+                replace(m, code);
+                done++;
+            }
+            return done >= 2;
+        });
     }
 
     /**

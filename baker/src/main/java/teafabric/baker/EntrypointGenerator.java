@@ -29,8 +29,9 @@ import org.objectweb.asm.tree.MethodNode;
  * </pre>
  *
  * Supported value forms are those of Fabric's default language adapter that need no reflection:
- * {@code a.b.C} (public no-arg constructor) and {@code a.b.C::FIELD} (static field). Anything
- * else is reported and skipped.
+ * {@code a.b.C} (public no-arg constructor) and {@code a.b.C::FIELD} (static field). Entrypoints for
+ * fabric-language-kotlin's adapter are supported the same way, a Kotlin {@code object} being its
+ * {@code INSTANCE} field. Anything else is reported and skipped.
  */
 final class EntrypointGenerator implements Opcodes {
     static final String CLASS_NAME = "teafabric/generated/Entrypoints";
@@ -79,7 +80,9 @@ final class EntrypointGenerator implements Opcodes {
     }
 
     private boolean emit(MethodVisitor mv, String modId, String key, EntrypointMetadata ep) {
-        if (!ep.getAdapter().equals("default")) {
+        // fabric-language-kotlin's adapter: a Kotlin object is its INSTANCE field, anything else as by default
+        boolean kotlin = ep.getAdapter().equals("kotlin");
+        if (!ep.getAdapter().equals("default") && !kotlin) {
             System.err.println("[baker] Skipping entrypoint " + key + " of " + modId + ": language adapter '"
                     + ep.getAdapter() + "' is not supported ahead of time");
             return false;
@@ -116,13 +119,21 @@ final class EntrypointGenerator implements Opcodes {
                 }
             }
         } else {
+            if (kotlin) {
+                for (FieldNode f : node.fields) {
+                    if (f.name.equals("INSTANCE") && (f.access & ACC_STATIC) != 0 && f.desc.equals("L" + internal + ";")) {
+                        member = "INSTANCE";
+                        fieldDesc = f.desc;
+                    }
+                }
+            }
             boolean hasCtor = false;
             for (MethodNode m : node.methods) {
                 if (m.name.equals("<init>") && m.desc.equals("()V")) {
                     hasCtor = true;
                 }
             }
-            if (!hasCtor || (node.access & (ACC_ABSTRACT | ACC_INTERFACE)) != 0) {
+            if (member == null && (!hasCtor || (node.access & (ACC_ABSTRACT | ACC_INTERFACE)) != 0)) {
                 System.err.println("[baker] Skipping entrypoint " + key + " of " + modId + ": " + className
                         + " has no no-arg constructor");
                 return false;

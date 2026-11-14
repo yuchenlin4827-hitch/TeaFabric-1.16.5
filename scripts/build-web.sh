@@ -13,7 +13,15 @@ cd "$(dirname "$0")/.."
 GRADLE=${GRADLE:-gradle}
 [ -x ./gradlew ] && GRADLE=./gradlew
 # ADVANCED: 72 MB instead of 106 MB, a world is created about 30% faster than with SIMPLE.
+# Compiler heap: large mod sets need more than the 6 GB default; use what the machine has (total memory minus
+# 3 GB for Gradle and the system), between 6 and 12 GB. TEAVM_HEAP=8g overrides.
+if [ -z "${TEAVM_HEAP:-}" ]; then
+  total_gb=$(awk '/MemTotal/ { printf "%d", $2 / 1048576 }' /proc/meminfo 2>/dev/null || echo 9)
+  heap=$((total_gb - 3)); [ "$heap" -lt 6 ] && heap=6; [ "$heap" -gt 12 ] && heap=12
+  TEAVM_HEAP=${heap}g
+fi
 TEAVM_OPTS=${TEAVM_OPTS:--PteavmOpt=ADVANCED -PteavmObfuscated=false}
+TEAVM_OPTS="$TEAVM_OPTS -PteavmHeap=$TEAVM_HEAP"
 
 step() { echo; echo "==> $*"; }
 run() { "$GRADLE" --console=plain -q "$@"; }
