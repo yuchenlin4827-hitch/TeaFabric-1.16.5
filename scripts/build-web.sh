@@ -5,14 +5,15 @@
 #
 #   scripts/build-web.sh                 # game + Fabric API + every jar in ./mods
 #   WITH_FABRIC_API=false scripts/build-web.sh
-#   TEAVM_OPTS="-PteavmOpt=ADVANCED" scripts/build-web.sh
+#   TEAVM_OPTS="-PteavmOpt=SIMPLE" scripts/build-web.sh   # faster to compile, larger and slower to run
 #
 # Then: python3 -m http.server -d build/web 8080
 set -u
 cd "$(dirname "$0")/.."
 GRADLE=${GRADLE:-gradle}
 [ -x ./gradlew ] && GRADLE=./gradlew
-TEAVM_OPTS=${TEAVM_OPTS:--PteavmOpt=SIMPLE -PteavmObfuscated=false}
+# ADVANCED: 72 MB instead of 106 MB, a world is created about 30% faster than with SIMPLE.
+TEAVM_OPTS=${TEAVM_OPTS:--PteavmOpt=ADVANCED -PteavmObfuscated=false}
 
 step() { echo; echo "==> $*"; }
 run() { "$GRADLE" --console=plain -q "$@"; }

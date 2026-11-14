@@ -164,8 +164,11 @@ WORKER_NAME=my-mc scripts/deploy-cloudflare.sh
 ```
 
 The browser asks for the password once (any user name); a signed cookie then keeps you in for 30 days.
-`classes.wasm` (about 105 MB) is over Cloudflare's 25 MiB per-file limit, so it is uploaded in 24 MiB
-parts that `boot.js` reassembles (`teavm/classes.wasm.parts.json`). The same Worker relays multiplayer
+Cloudflare does not compress these files, so the deploy stores the large ones gzip-compressed under
+content-hashed names in `c/` (in parts below the 25 MiB file limit), listed in `files.json`; `boot.js`
+downloads them with progress and decompresses them natively (`DecompressionStream`). A first visit
+downloads about 36 MB instead of about 110 MB, and the Worker lets browsers keep `c/`, `sounds/` and
+`lang/` for a year, so later visits download only what a new build changed. The same Worker relays multiplayer
 connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
 (not tested yet; the free plan's CPU limits may cut busy connections).
 
@@ -387,4 +390,6 @@ Not working yet / known issues:
 * Singleplayer is slow: the integrated server shares the page's only thread with the client.
 * Multiplayer needs a WebSocket ↔ TCP proxy (browsers cannot open TCP sockets); online-mode
   authentication is not available.
-* Performance work (optimisation level, uniform caching, streaming buffers) has not started.
+* Performance: the module is compiled with TeaVM's `ADVANCED` optimisation (72 MB instead of 106 MB with
+  `SIMPLE`; measured in headless Chromium: title screen after 11.0 s instead of 12.9 s, a new world ready
+  after 43 s instead of 63 s). Rendering work (uniform caching, streaming buffers) has not started.
