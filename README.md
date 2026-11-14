@@ -404,8 +404,8 @@ and `gl_Vertex`, up to eight render targets, shadow maps, and in newer packs com
 load/store), while WebGL 2 runs GLSL ES 3.00 without any of the built-ins, compute shaders or image access.
 Every pack would need a translator for all of that, and a pack renders the world a second time for its
 shadow map and adds a dozen full-screen passes per frame, on a page that already spends most of its
-frame in Minecraft's own code. WebGPU would not change this: it has no compatibility profile either, needs
-its own shading language (WGSL), and is missing on many of the older devices this is played on.
+frame in Minecraft's own code. The WebGPU renderer (`?webgpu`, see Status) brings compute shaders and image
+load/store, which some packs need; the translation of compatibility-profile GLSL is still missing either way.
 
 ### Server protocol: 1.12.2 / 1.16.5 (ViaFabric)
 
@@ -485,6 +485,15 @@ Not working yet / known issues:
 * Lighter video settings for the browser (`WebDefaults`): once per player, options still at vanilla's
   default become render distance 6, biome blend 3×3, mipmap levels 2, fast clouds and decreased
   particles; options a player changed are kept.
-* WebGPU: not used. A CPU profile of a world shows the time in Minecraft's own code and the browser, not
-  in the GL emulation (0.3%), so a WebGPU backend would not make the game itself faster, and the slow
-  devices this is played on often have no WebGPU at all.
+* WebGPU (`?webgpu` in the page address; WebGL 2 stays the default): `web/webgpu/webgpu-gl.js` implements the
+  WebGL 2 calls the GL emulation makes on WebGPU, so the game itself is unchanged. Shaders are converted when
+  a program is linked, GLSL ES 3.00 to Vulkan-style GLSL (`glsl-vk.js`) and then to WGSL by naga, the shader
+  translator of wgpu (`web/webgpu/naga`, from the naga-wasm package, MIT/Apache-2.0); all 17 programs the game
+  and Sodium use convert. OpenGL's conventions are kept (clip depth, bottom-up rows in render targets,
+  integer attributes, triangle fans), streamed vertices and uniforms go to per-submit buffers, and a frame is
+  submitted when the game swaps buffers. The title screen and singleplayer worlds with Sodium render as with
+  WebGL (tested in headless Chromium with SwiftShader, locally and on the Cloudflare site). Frame rates under
+  software rendering were the same within noise (5.7 and 3.7 fps with WebGL, 5.4 and 2.3 with WebGPU): the
+  time goes to Minecraft's own code, not to the graphics API. Not supported yet: readPixels (screenshots and
+  the world icon come back black), stencil, clears limited by a scissor. WebGPU matters for shader packs,
+  which can use compute shaders and image load/store that WebGL 2 lacks.
