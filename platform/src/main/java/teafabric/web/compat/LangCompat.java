@@ -243,4 +243,94 @@ public final class LangCompat {
     /** {@code Thread.setContextClassLoader}: there are no class loaders; accepted and ignored. */
     public static void setContextClassLoader(Thread thread, ClassLoader loader) {
     }
+
+    /** java.awt.Color.RGBtoHSB, as in the JDK (Mouse Wheelie sorts items by colour). */
+    public static float[] RGBtoHSB(int r, int g, int b, float[] hsb) {
+        if (hsb == null) {
+            hsb = new float[3];
+        }
+        int max = Math.max(r, Math.max(g, b));
+        int min = Math.min(r, Math.min(g, b));
+        float brightness = max / 255.0f;
+        float saturation = max != 0 ? (float) (max - min) / max : 0;
+        float hue;
+        if (saturation == 0) {
+            hue = 0;
+        } else {
+            float span = max - min;
+            float redc = (max - r) / span;
+            float greenc = (max - g) / span;
+            float bluec = (max - b) / span;
+            if (r == max) {
+                hue = bluec - greenc;
+            } else if (g == max) {
+                hue = 2.0f + redc - bluec;
+            } else {
+                hue = 4.0f + greenc - redc;
+            }
+            hue = hue / 6.0f;
+            if (hue < 0) {
+                hue = hue + 1.0f;
+            }
+        }
+        hsb[0] = hue;
+        hsb[1] = saturation;
+        hsb[2] = brightness;
+        return hsb;
+    }
+
+    /** Package versions come from jar manifests, which compiled classes do not have. */
+    public static String getSpecificationVersion(Package pkg) {
+        return null;
+    }
+
+    public static String getImplementationVersion(Package pkg) {
+        return null;
+    }
+
+    public static String getImplementationTitle(Package pkg) {
+        return null;
+    }
+
+    /** Properties.store(Writer, String), in the JDK's format (Fabrishot's config). */
+    public static void store(java.util.Properties props, java.io.Writer writer, String comments)
+            throws java.io.IOException {
+        StringBuilder out = new StringBuilder();
+        if (comments != null) {
+            out.append('#').append(comments.replace("\n", "\n#")).append('\n');
+        }
+        out.append('#').append(new Date()).append('\n');
+        for (String key : props.stringPropertyNames()) {
+            escape(out, key, true);
+            out.append('=');
+            escape(out, props.getProperty(key), false);
+            out.append('\n');
+        }
+        writer.write(out.toString());
+        writer.flush();
+    }
+
+    private static void escape(StringBuilder out, String s, boolean key) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': out.append("\\\\"); break;
+                case '\t': out.append("\\t"); break;
+                case '\n': out.append("\\n"); break;
+                case '\r': out.append("\\r"); break;
+                case '\f': out.append("\\f"); break;
+                case '=': case ':': case '#': case '!':
+                    out.append('\\').append(c);
+                    break;
+                case ' ':
+                    if (key || i == 0) {
+                        out.append('\\');
+                    }
+                    out.append(c);
+                    break;
+                default:
+                    out.append(c);
+            }
+        }
+    }
 }

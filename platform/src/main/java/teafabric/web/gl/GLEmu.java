@@ -1768,9 +1768,6 @@ public final class GLEmu {
     @org.teavm.jso.JSBody(params = "o", script = "return String(o);")
     private static native String jsString(org.teavm.jso.JSObject o);
 
-    @org.teavm.jso.JSBody(params = "o", script = "return o | 0;")
-    private static native int jsInt(org.teavm.jso.JSObject o);
-
     /** glGetActiveUniform: the name, with size and type written to the buffers. */
     public static String getActiveUniform(int program, int index, java.nio.IntBuffer size, java.nio.IntBuffer type) {
         UserProgram p = programs.get(program);

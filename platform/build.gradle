@@ -24,6 +24,8 @@ dependencies {
     compileOnly "org.teavm:teavm-classlib:${teavmVersion}"
     compileOnly "org.teavm:teavm-core:${teavmVersion}"
     compileOnly files(rootProject.file('.cache/baked/baked.jar'))
+    // org.slf4j.impl.StaticLoggerBinder (used only when a mod bundles slf4j-api, such as Iris)
+    compileOnly 'org.slf4j:slf4j-api:1.7.12'
     compileOnly files(rootProject.setupJars('minecraft.libraries').findAll { !it.name.startsWith('lwjgl') })
 
     teavmProgram "org.teavm:teavm-classlib:${teavmVersion}"

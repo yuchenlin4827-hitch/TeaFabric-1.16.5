@@ -159,7 +159,46 @@ public class GLFW {
     }
 
     public static void glfwSetWindowMonitor(long window, long monitor, int x, int y, int w, int h, int refresh) {
-        WebWindow.setFullscreen(monitor != 0);
+        WebWindow.setFullscreen(monitor != 0 || !decorated);
+    }
+
+    public static final int GLFW_FOCUSED = 0x20001;
+    public static final int GLFW_ICONIFIED = 0x20002;
+    public static final int GLFW_RESIZABLE = 0x20003;
+    public static final int GLFW_VISIBLE = 0x20004;
+    public static final int GLFW_DECORATED = 0x20005;
+    public static final int GLFW_HOVERED = 0x2000B;
+
+    /** Focus and visibility follow the page (Dynamic FPS); the canvas is always resizable and "decorated". */
+    public static int glfwGetWindowAttrib(long window, int attrib) {
+        switch (attrib) {
+            case GLFW_FOCUSED:
+                return WebWindow.focused() ? 1 : 0;
+            case GLFW_ICONIFIED:
+                return WebWindow.visible() ? 0 : 1;
+            case GLFW_VISIBLE:
+                return WebWindow.visible() ? 1 : 0;
+            case GLFW_RESIZABLE:
+            case GLFW_HOVERED:
+                return 1;
+            case GLFW_DECORATED:
+                return decorated ? 1 : 0;
+            default:
+                return 0;
+        }
+    }
+
+    private static boolean decorated = true;
+
+    /**
+     * Borderless Mining makes "fullscreen" an undecorated window the size of the monitor; in a page the
+     * equivalent is the browser's fullscreen mode, so removing the decoration enters it and restoring it leaves.
+     */
+    public static void glfwSetWindowAttrib(long window, int attrib, int value) {
+        if (attrib == GLFW_DECORATED && decorated != (value != 0)) {
+            decorated = value != 0;
+            WebWindow.setFullscreen(!decorated);
+        }
     }
 
     public static long glfwGetWindowMonitor(long window) {
@@ -208,6 +247,15 @@ public class GLFW {
     public static void glfwGetMonitorPos(long monitor, int[] x, int[] y) {
         x[0] = 0;
         y[0] = 0;
+    }
+
+    public static void glfwGetMonitorPos(long monitor, java.nio.IntBuffer x, java.nio.IntBuffer y) {
+        if (x != null) {
+            x.put(x.position(), 0);
+        }
+        if (y != null) {
+            y.put(y.position(), 0);
+        }
     }
 
     public static GLFWVidMode glfwGetVideoMode(long monitor) {

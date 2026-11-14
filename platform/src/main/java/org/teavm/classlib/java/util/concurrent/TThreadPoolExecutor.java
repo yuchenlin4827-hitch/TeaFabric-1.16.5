@@ -1,7 +1,10 @@
 package org.teavm.classlib.java.util.concurrent;
 
+import java.util.AbstractQueue;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -9,7 +12,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Thread pool on TeaVM green threads. Workers are created on demand up to the maximum pool size and
  * take tasks from an internal FIFO; the BlockingQueue passed to the constructor is accepted for API
- * compatibility only.
+ * compatibility only, and {@link #getQueue} returns a view of that FIFO.
  */
 public class TThreadPoolExecutor extends TAbstractExecutorService {
     private final ArrayDeque<Runnable> tasks = new ArrayDeque<>();
@@ -96,6 +99,106 @@ public class TThreadPoolExecutor extends TAbstractExecutorService {
             synchronized (this) {
                 workers.remove(Thread.currentThread());
                 notifyAll();
+            }
+        }
+    }
+
+    /** The pending tasks (Light Overlay checks its size and clears it). */
+    public BlockingQueue<Runnable> getQueue() {
+        return new TaskQueue();
+    }
+
+    private final class TaskQueue extends AbstractQueue<Runnable> implements BlockingQueue<Runnable> {
+        private final Object lock = TThreadPoolExecutor.this;
+
+        @Override
+        public Iterator<Runnable> iterator() {
+            synchronized (lock) {
+                return new ArrayList<>(tasks).iterator();
+            }
+        }
+
+        @Override
+        public int size() {
+            synchronized (lock) {
+                return tasks.size();
+            }
+        }
+
+        @Override
+        public void clear() {
+            synchronized (lock) {
+                tasks.clear();
+            }
+        }
+
+        @Override
+        public boolean remove(Object o) {
+            synchronized (lock) {
+                return tasks.remove(o);
+            }
+        }
+
+        @Override
+        public boolean offer(Runnable r) {
+            execute(r);
+            return true;
+        }
+
+        @Override
+        public Runnable poll() {
+            synchronized (lock) {
+                return tasks.poll();
+            }
+        }
+
+        @Override
+        public Runnable peek() {
+            synchronized (lock) {
+                return tasks.peek();
+            }
+        }
+
+        @Override
+        public void put(Runnable r) {
+            execute(r);
+        }
+
+        @Override
+        public boolean offer(Runnable r, long timeout, TimeUnit unit) {
+            execute(r);
+            return true;
+        }
+
+        @Override
+        public Runnable take() {
+            throw new UnsupportedOperationException("the pool's workers take its tasks");
+        }
+
+        @Override
+        public Runnable poll(long timeout, TimeUnit unit) {
+            return poll();
+        }
+
+        @Override
+        public int remainingCapacity() {
+            return Integer.MAX_VALUE;
+        }
+
+        @Override
+        public int drainTo(Collection<? super Runnable> c) {
+            return drainTo(c, Integer.MAX_VALUE);
+        }
+
+        @Override
+        public int drainTo(Collection<? super Runnable> c, int max) {
+            synchronized (lock) {
+                int n = 0;
+                while (n < max && !tasks.isEmpty()) {
+                    c.add(tasks.poll());
+                    n++;
+                }
+                return n;
             }
         }
     }

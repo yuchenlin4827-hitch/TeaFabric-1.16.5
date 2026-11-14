@@ -1,5 +1,10 @@
 # Call-site redirects applied by the TeaVM plugin (compiler/.../RedirectTransformer).
 # owner                  method               descriptor                                   -> target
+java.awt.Color           RGBtoHSB             (III[F)[F                                     -> teafabric.web.compat.LangCompat
+java.lang.Package        getSpecificationVersion ()Ljava/lang/String;                      -> teafabric.web.compat.LangCompat
+java.lang.Package        getImplementationVersion ()Ljava/lang/String;                     -> teafabric.web.compat.LangCompat
+java.lang.Package        getImplementationTitle ()Ljava/lang/String;                       -> teafabric.web.compat.LangCompat
+java.util.Properties     store                (Ljava/io/Writer;Ljava/lang/String;)V         -> teafabric.web.compat.LangCompat
 org.lwjgl.PointerBuffer  flip                 ()Lorg/lwjgl/system/CustomBuffer;             -> teafabric.web.compat.LangCompat
 java.util.BitSet         stream               ()Ljava/util/stream/IntStream;                -> teafabric.web.compat.LangCompat
 java.lang.Runtime        addShutdownHook      (Ljava/lang/Thread;)V                        -> teafabric.web.compat.RuntimeCompat

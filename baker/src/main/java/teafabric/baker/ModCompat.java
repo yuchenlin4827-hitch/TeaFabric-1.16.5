@@ -35,6 +35,140 @@ final class ModCompat {
         lithium(classes);
         sodium(classes);
         slightGuiModifications(classes);
+        architecturyPlatformMethods(classes);
+        notEnoughCrashes(classes);
+    }
+
+    /**
+     * Not Enough Crashes, at start-up, downloads Yarn mappings (to show crash stack traces with readable names),
+     * installs a Log4j rewrite policy for the same purpose, and installs a SecurityManager that turns
+     * System.exit into an exception. None of these exist in a browser; the crash and recovery screens, the
+     * mod's purpose, do not depend on them. Identifying the mods in a stack trace reads each class's code
+     * source (its jar), which compiled classes do not have, so the list of suspected mods stays empty.
+     */
+    private static void notEnoughCrashes(Map<String, byte[]> classes) {
+        String deobf = "fudge/notenoughcrashes/fabric/StacktraceDeobfuscator";
+        if (classes.containsKey(deobf)) {
+            patch(classes, deobf, node -> {
+                int done = 0;
+                for (MethodNode m : node.methods) {
+                    InsnList code = new InsnList();
+                    if ((m.name.equals("init") && m.desc.equals("()V"))
+                            || (m.name.equals("deobfuscateThrowable") && m.desc.equals("(Ljava/lang/Throwable;)V"))) {
+                        code.add(new InsnNode(Opcodes.RETURN));
+                    } else if (m.name.equals("deobfuscateStacktrace")
+                            && m.desc.equals("([Ljava/lang/StackTraceElement;Z)[Ljava/lang/StackTraceElement;")) {
+                        code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                        code.add(new InsnNode(Opcodes.ARETURN));
+                    } else {
+                        continue;
+                    }
+                    replace(m, code);
+                    done++;
+                }
+                return done == 3;
+            });
+        }
+        String exitBlock = "fudge/notenoughcrashes/utils/SystemExitBlock";
+        if (classes.containsKey(exitBlock)) {
+            patch(classes, exitBlock, node -> {
+                MethodNode m = method(node, "forbidSystemExitCall", "()V");
+                if (m == null) {
+                    return false;
+                }
+                InsnList code = new InsnList();
+                code.add(new InsnNode(Opcodes.RETURN));
+                replace(m, code);
+                return true;
+            });
+        }
+        String identifier = "fudge/notenoughcrashes/stacktrace/ModIdentifier";
+        if (classes.containsKey(identifier)) {
+            patch(classes, identifier, node -> {
+                MethodNode m = method(node, "identifyFromStacktrace", "(Ljava/lang/Throwable;)Ljava/util/Set;");
+                if (m == null) {
+                    return false;
+                }
+                InsnList code = new InsnList();
+                code.add(new TypeInsnNode(Opcodes.NEW, "java/util/HashSet"));
+                code.add(new InsnNode(Opcodes.DUP));
+                code.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/util/HashSet", "<init>", "()V", false));
+                code.add(new InsnNode(Opcodes.ARETURN));
+                replace(m, code);
+                return true;
+            });
+        }
+    }
+
+    /**
+     * Architectury's @ExpectPlatform methods (used by Architectury API and by mods built with it: Cloth Config,
+     * BetterF3, Light Overlay, Not Enough Crashes) are invokedynamic calls whose bootstrap method, PlatformMethods
+     * .platform, finds the loader's implementation by name at run time and returns a call site for it. TeaVM
+     * cannot run bootstrap methods, so each call becomes the direct call the bootstrap would have produced: a
+     * static method of the same name and type in {@code <package>.fabric.<class name without $>Impl}.
+     */
+    private static void architecturyPlatformMethods(Map<String, byte[]> classes) {
+        byte[] marker = "PlatformMethods".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        int sites = 0;
+        int patched = 0;
+        for (Map.Entry<String, byte[]> e : classes.entrySet()) {
+            if (!contains(e.getValue(), marker)) {
+                continue;
+            }
+            String caller = e.getKey();
+            ClassNode node = new ClassNode();
+            new ClassReader(e.getValue()).accept(node, 0);
+            int slash = caller.lastIndexOf('/');
+            String impl = caller.substring(0, slash + 1) + "fabric/" + caller.substring(slash + 1).replace("$", "")
+                    + "Impl";
+            int here = 0;
+            for (MethodNode m : node.methods) {
+                for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (!(insn instanceof InvokeDynamicInsnNode)) {
+                        continue;
+                    }
+                    InvokeDynamicInsnNode indy = (InvokeDynamicInsnNode) insn;
+                    if (!indy.bsm.getName().equals("platform") || !indy.bsm.getOwner().endsWith("/PlatformMethods")
+                            || !indy.bsm.getDesc().equals("(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                                    + "Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;")) {
+                        continue;
+                    }
+                    if (!classes.containsKey(impl)) {
+                        System.out.println("[baker] WARNING: no platform implementation " + impl + " for "
+                                + caller + "." + indy.name + indy.desc);
+                        continue;
+                    }
+                    MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, impl, indy.name, indy.desc, false);
+                    m.instructions.set(indy, call);
+                    insn = call;
+                    here++;
+                }
+            }
+            if (here > 0) {
+                ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+                node.accept(writer);
+                e.setValue(writer.toByteArray());
+                sites += here;
+                patched++;
+            }
+        }
+        if (sites > 0) {
+            System.out.println("[baker] Compat patch: " + sites + " Architectury platform call(s) in " + patched
+                    + " class(es) made direct");
+        }
+    }
+
+    private static boolean contains(byte[] bytes, byte[] part) {
+        outer:
+        for (int i = 0, n = bytes.length - part.length; i <= n; i++) {
+            for (int j = 0; j < part.length; j++) {
+                if (bytes[i + j] != part[j]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
