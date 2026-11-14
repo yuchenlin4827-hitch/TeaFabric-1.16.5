@@ -659,6 +659,11 @@
       const storeReady = tf.store.init();
       await loadManifest();
       serveDownloadsToRuntime();
+      // servers.json (from the deploy scripts): servers added to the multiplayer list on first visit.
+      try {
+        const r = await nativeFetch('servers.json', { cache: 'no-cache' });
+        if (r.ok) tf.config.defaultServers = await r.text();
+      } catch (e) { /* none */ }
       tf.archives['/classpath'] = await download('data/classpath.zip', 'Downloading game resources', 0.15, 0);
       tf.archives['/minecraft/assets'] = await download('data/assets.zip', 'Downloading assets', 0.15, 0.15);
       await download('teavm/classes.wasm', 'Downloading game code', 0.2, 0.3);

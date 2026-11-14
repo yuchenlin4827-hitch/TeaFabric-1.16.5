@@ -57,8 +57,12 @@ build darwin amd64 TeaFabric-mac-intel
 build linux amd64 TeaFabric-linux
 chmod +x "$STAGE"/TeaFabric-*
 
+# The server in the multiplayer list on first start (boot.js reads servers.json).
+if [ -n "${SERVER:-}" ]; then
+  node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify([{ name: process.argv[2], ip: process.argv[3] }]))' "$STAGE/web/servers.json" "${SERVER_NAME:-TeaFabric 伺服器}" "$SERVER"
+fi
 server_line="向服主索取伺服器地址。"
-[ -n "${SERVER:-}" ] && server_line="伺服器地址：$SERVER"
+[ -n "${SERVER:-}" ] && server_line="伺服器已經在「多人遊戲」的清單裡（地址：$SERVER）。"
 cat > "$STAGE/使用說明.txt" <<EOF
 TeaFabric 1.16.5（下載版）
 

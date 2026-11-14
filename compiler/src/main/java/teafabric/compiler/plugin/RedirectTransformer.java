@@ -38,6 +38,7 @@ import org.teavm.model.instructions.InvokeInstruction;
  * An instance call {@code owner.m(args)} becomes {@code target.m(owner, args)}; a static call keeps
  * its parameter list. An owner written as {@code *owner.Class} matches the method on any receiver class
  * (call sites of inherited/default methods name the subclass); the target still takes {@code owner.Class}.
+ * Super calls ({@code super.m(...)}) are left alone: redirecting them would re-dispatch to the override.
  * A target written as {@code target.Class#name(desc)} names the replacement exactly (the receiver, if any,
  * becomes its first parameter): it can take {@code Object} for types the platform layer cannot compile
  * against, such as classes of an optional mod. Constructors ({@code <init>}) are not supported. Classes whose name starts
@@ -115,7 +116,7 @@ public class RedirectTransformer implements ClassHolderTransformer {
                 BasicBlock block = program.basicBlockAt(i);
                 for (Instruction insn : block) {
                     if (insn instanceof InvokeInstruction) {
-                        rewrite((InvokeInstruction) insn);
+                        rewrite((InvokeInstruction) insn, cls.getName());
                     }
                 }
             }
@@ -142,8 +143,15 @@ public class RedirectTransformer implements ClassHolderTransformer {
                 + "native libraries are not available in the browser")).raise();
     }
 
-    private void rewrite(InvokeInstruction insn) {
+    private void rewrite(InvokeInstruction insn, String caller) {
         MethodReference ref = insn.getMethod();
+        // A super call (super.m(...) in a subclass) is never redirected: the target would call m
+        // virtually and land back in the overriding method that made the super call (infinite
+        // recursion). Private calls (SPECIAL on the caller's own class) are still redirected.
+        if (insn.getType() == InvocationType.SPECIAL && insn.getInstance() != null
+                && !ref.getName().equals("<init>") && !ref.getClassName().equals(caller)) {
+            return;
+        }
         String target = rules.get(ref);
         if (target == null) {
             String[] any = insn.getInstance() != null ? anyOwnerRules.get(ref.getDescriptor()) : null;

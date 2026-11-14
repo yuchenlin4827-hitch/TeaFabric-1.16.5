@@ -1,0 +1,7 @@
+{
+  "file": "/data/plugins/AuthMe/config.yml",
+  "ops": [
+    { "$set": { "path": "$.settings.restrictions.maxRegPerIp", "value": 0, "value-type": "int" } },
+    { "$set": { "path": "$.settings.restrictions.displayOtherAccounts", "value": false, "value-type": "bool" } }
+  ]
+}

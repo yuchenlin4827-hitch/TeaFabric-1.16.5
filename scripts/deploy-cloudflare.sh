@@ -5,7 +5,8 @@
 #   scripts/deploy-cloudflare.sh              # deploy; on the first run a password is generated and printed
 #   WORKER_NAME=my-mc scripts/deploy-cloudflare.sh
 #   PASSWORD=... scripts/deploy-cloudflare.sh # set or change the password
-#   SERVER_ADDRESS=wss://relay.example.com/ scripts/deploy-cloudflare.sh   # shown on /download/
+#   SERVER_ADDRESS=wss://relay.example.com/ scripts/deploy-cloudflare.sh   # in the multiplayer list and on /download/
+#   SERVER_NAME=... (its name in the list; default "TeaFabric 伺服器")
 #   LAUNCHER=0 scripts/deploy-cloudflare.sh   # without the downloadable version (/download/)
 #
 # Needs Node.js and a Cloudflare account (npx wrangler login, or CLOUDFLARE_API_TOKEN).
@@ -21,6 +22,10 @@ rm -rf "$OUT/dist"
 mkdir -p "$OUT/dist"
 # The page and the runtime; not the test pages (build/web/mini*).
 cp build/web/index.html build/web/boot.js build/web/style.css "$OUT/dist/"
+# The server players see in the multiplayer list on their first visit (boot.js reads servers.json).
+if [ -n "${SERVER_ADDRESS:-}" ]; then
+  node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify([{ name: process.argv[2], ip: process.argv[3] }]))' "$OUT/dist/servers.json" "${SERVER_NAME:-TeaFabric 伺服器}" "$SERVER_ADDRESS"
+fi
 # Sounds and translations, fetched by the page when first needed (sounds/<hash>.ogg, lang/<hash>.json).
 [ -d build/web/sounds ] && cp -r build/web/sounds "$OUT/dist/"
 [ -d build/web/lang ] && cp -r build/web/lang "$OUT/dist/"

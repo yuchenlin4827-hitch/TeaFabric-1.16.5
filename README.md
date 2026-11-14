@@ -23,7 +23,7 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 - 網站有**密碼保護**：頁面包含 Minecraft 的程式和素材，不能公開發布。密碼請在 QQ 群或 Discord 索取（使用者名稱隨便填）。
 - 瀏覽器需要支援 WebAssembly GC：Chrome / Edge 119+、Firefox 120+、Safari 18.2+，建議用電腦（鍵盤加滑鼠）。
 - 網頁版第一次載入約 150 MB；網路慢的話建議用下載版。
-- 進入前要輸入自己的玩家名稱（不能用 `Player`）。多人伺服器的地址寫在下載頁上；第一次進入伺服器時輸入
+- 進入前要輸入自己的玩家名稱（不能用 `Player`）。「多人遊戲」清單裡已經有我們的伺服器；第一次進入伺服器時輸入
   `/register 密碼 密碼`，之後每次輸入 `/login 密碼`。
 
 The demo above is password-protected because the page contains Minecraft's code and assets; ask for
@@ -222,6 +222,31 @@ railway up --service relay && railway domain --service relay
 - **Changing the ban message**: Minecraft keeps the first reason of a ban. To change it, put
   `pardon Player` on the line before `ban Player …` in `RCON_CMDS_STARTUP` (the variable takes one
   command per line).
+- **Players share one IP**: everyone reaches the server through the relay, so the server sees the
+  relay's address for all of them. Two config patches account for that (`deploy/railway/patches/`,
+  fetched with `APPLY_EXTRA_FILES` and applied by `PATCH_DEFINITIONS`): AuthMe allows any number of
+  registrations per IP (it allowed one, so only one player could ever register) and no longer tells a
+  newcomer the names of the other accounts on "their" IP, and Bukkit's connection throttle is off
+  (it refused a second join within 4 s). `APPLY_EXTRA_FILES` keeps files that already exist, so a
+  changed patch needs a new file name.
+  ```bash
+  B=https://raw.githubusercontent.com/<owner>/<repo>/<commit>/deploy/railway/patches
+  railway variables --service minecraft --set "APPLY_EXTRA_FILES=teafabric/patchdefs<$B/authme-shared-ip.json
+  teafabric/patchdefs<$B/bukkit.json" --set PATCH_DEFINITIONS=/data/teafabric/patchdefs
+  ```
+- **Server list look**: `ICON=<URL of deploy/railway/server-icon.png>` (64×64 pixel-art tea cup) and a
+  two-line coloured `MOTD`; write `§` codes and non-ASCII text as `\uXXXX` escapes (server.properties
+  is read as ISO-8859-1), and `\n` for the second line.
+- **Spawn**: a 21×21 stone-brick plaza at the spawn point with paths, hedges, lanterns and signs
+  explaining `/register` and `/login`; `spawnRadius 0` puts every player in its centre, and the default
+  spawn protection (16 blocks) keeps it intact. It was built once with console commands in
+  `RCON_CMDS_STARTUP` (absolute coordinates, `forceload` around them), which was then set back to the
+  ban. In sign text, write non-ASCII as `\\\\uXXXX`: one level of backslashes is lost before the
+  command reaches the server, and the SNBT string needs `\\u` for the JSON `\u`.
+- **Our server in the web client's list**: `SERVER_ADDRESS` given to `scripts/deploy-cloudflare.sh`
+  (and `SERVER` to `scripts/package-desktop.sh`) writes `servers.json`; on a player's first visit the
+  page adds that server at the top of the multiplayer list (once: a player who removes it keeps it
+  removed). `SERVER_NAME` sets its name (default "TeaFabric 伺服器").
 - **Whitelist**: to limit who can join at all, add `ENABLE_WHITELIST=TRUE` and `WHITELIST=Name1,Name2`.
 - **Forgotten passwords**: an operator can run `authme unregister <name>` on the server console (or add
   it to `RCON_CMDS_STARTUP` once); a logged-in player can drop their own account with
@@ -369,6 +394,9 @@ Working:
 * Sound: effects and streamed music through WebAudio, decoded by the browser (tested in Chromium:
   button clicks, menu music, footsteps and other sounds in a world).
 * Every language: switching to 繁體中文 takes under a second (one translation file is fetched).
+* Graphics: Fast and Fancy. Fabulous! is not offered (its translucency post-processing chain is not
+  supported by the WebGL emulation and rendered worlds black); Fabulous in an old options.txt loads as
+  Fancy, and the GPU warnlist screen is off (the emulation reports OpenGL 2.1, so it always warned).
 * TeaVM class-library bugs found by running the same programs on the JVM and in the browser and
   diffing the output, all patched in `compiler/src/runtime`: `ArrayDeque` iterator removal,
   `ListIterator.add`, `java.util.Random` (now bit-identical to the JDK), `Math.round/rint/ulp/cbrt/log10`,
