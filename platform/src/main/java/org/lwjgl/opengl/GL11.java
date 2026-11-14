@@ -199,7 +199,7 @@ public class GL11 {
     }
 
     public static boolean glIsEnabled(int cap) {
-        return WebGLAccess.gl().isEnabled(cap);
+        return GLEmu.isEnabled(cap);
     }
 
     public static void glLightModelfv(int pname, FloatBuffer params) {

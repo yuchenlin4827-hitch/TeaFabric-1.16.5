@@ -118,6 +118,7 @@ public final class Baker implements PreLaunchEntrypoint {
         json.append("]}");
         resources.put("teafabric/mods.json", json.toString().getBytes(StandardCharsets.UTF_8));
 
+        ModCompat.apply(classes, resources);
         generateSyntheticClasses();
         collectMixinExtrasClasses();
         classes.put(EntrypointGenerator.CLASS_NAME, new EntrypointGenerator(classes).generate(entrypoints));

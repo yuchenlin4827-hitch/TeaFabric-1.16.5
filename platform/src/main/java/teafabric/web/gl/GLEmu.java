@@ -56,6 +56,12 @@ public final class GLEmu {
         String log = "";
         boolean linked;
         String firstAttribute;
+        boolean explicitAttributes; // glBindAttribLocation was used: no gl_Vertex aliasing
+        // The alpha test GlslTranslator adds to fragment shaders, and the values last set.
+        WebGLUniformLocation alphaFuncLoc;
+        WebGLUniformLocation alphaRefLoc;
+        int cAlphaFunc;
+        float cAlphaRef = Float.NaN;
     }
 
     private static int alloc(List<JSObject> table, JSObject obj) {
@@ -97,11 +103,44 @@ public final class GLEmu {
     private static final ArrayPtr colorArray = new ArrayPtr();
     private static final ArrayPtr normalArray = new ArrayPtr();
     private static final ArrayPtr[] texCoordArray = {new ArrayPtr(), new ArrayPtr(), new ArrayPtr()};
-    private static final ArrayPtr[] genericArray = new ArrayPtr[16];
+    // Generic attribute arrays. A vertex array object (emulated: the WebGL default VAO is used, and the
+    // pointers are applied at draw time) is simply its own set of these.
+    private static final ArrayPtr[] defaultGenericArray = newGenericArrays();
+    private static ArrayPtr[] genericArray = defaultGenericArray;
+    private static final List<ArrayPtr[]> vertexArrays = new ArrayList<>();
 
-    static {
-        for (int i = 0; i < genericArray.length; i++) {
-            genericArray[i] = new ArrayPtr();
+    private static ArrayPtr[] newGenericArrays() {
+        ArrayPtr[] a = new ArrayPtr[16];
+        for (int i = 0; i < a.length; i++) {
+            a[i] = new ArrayPtr();
+        }
+        return a;
+    }
+
+    public static int genVertexArrays() {
+        if (vertexArrays.isEmpty()) {
+            vertexArrays.add(null); // id 0: the default arrays
+        }
+        vertexArrays.add(newGenericArrays());
+        return vertexArrays.size() - 1;
+    }
+
+    /** The emulated vertex array object bound (0: none), for glGetInteger(GL_VERTEX_ARRAY_BINDING). */
+    private static int boundVertexArray;
+
+    public static void bindVertexArray(int id) {
+        ArrayPtr[] a = id > 0 && id < vertexArrays.size() ? vertexArrays.get(id) : null;
+        genericArray = a != null ? a : defaultGenericArray;
+        boundVertexArray = a != null ? id : 0;
+    }
+
+    public static void deleteVertexArrays(int id) {
+        if (id > 0 && id < vertexArrays.size() && vertexArrays.get(id) != null) {
+            if (genericArray == vertexArrays.get(id)) {
+                genericArray = defaultGenericArray;
+                boundVertexArray = 0;
+            }
+            vertexArrays.set(id, null);
         }
     }
 
@@ -155,6 +194,84 @@ public final class GLEmu {
 
     static boolean trace;
 
+    // ---- WebGL state as last set, so that redundant calls are skipped (Minecraft re-sets texture
+    // parameters, pixel-store state, vertex attributes and uniforms far more often than they change).
+    // Buffers and textures are tracked by id (Java arrays of JS objects do not compile in Wasm GC):
+    // ids of the tables below, STREAM_VBO / QUAD_IBO for the emulation's own buffers, UNKNOWN when the
+    // WebGL state is not known (the next bind is always issued).
+    private static final int STREAM_VBO = -1;
+    private static final int QUAD_IBO = -2;
+    private static final int UNKNOWN = Integer.MIN_VALUE;
+    private static int glArrayBuffer = UNKNOWN;
+    private static int glElementBuffer = UNKNOWN;
+    private static int glActiveTexture = GLConst.TEXTURE0;
+    private static final int[] glBoundTexture = filled(32, UNKNOWN);
+    private static final int[] pixelStore = filled(8, Integer.MIN_VALUE);
+    private static int[][] texParams = new int[256][];
+    private static final int[] attrBuffer = filled(16, UNKNOWN);
+    private static final int[] attrSize = new int[16];
+    private static final int[] attrType = new int[16];
+    private static final int[] attrStride = new int[16];
+    private static final int[] attrOffset = new int[16];
+    private static final boolean[] attrNormalized = new boolean[16];
+    private static final boolean[] attrValid = new boolean[16];
+    private static final float[][] attribValue = new float[16][];
+
+    private static int[] filled(int n, int v) {
+        int[] a = new int[n];
+        java.util.Arrays.fill(a, v);
+        return a;
+    }
+
+    private static WebGLBuffer bufferObject(int id) {
+        return id == STREAM_VBO ? streamVbo : id == QUAD_IBO ? quadIbo : (WebGLBuffer) get(buffers, id);
+    }
+
+    private static void bindArrayBuffer(int id) {
+        if (glArrayBuffer != id) {
+            gl.bindBuffer(WebGL2RenderingContext.ARRAY_BUFFER, bufferObject(id));
+            glArrayBuffer = id;
+        }
+    }
+
+    private static void bindElementBuffer(int id) {
+        if (glElementBuffer != id) {
+            gl.bindBuffer(WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER, bufferObject(id));
+            glElementBuffer = id;
+        }
+    }
+
+    private static void glActive(int texture) {
+        if (glActiveTexture != texture) {
+            gl.activeTexture(texture);
+            glActiveTexture = texture;
+        }
+    }
+
+    private static void glBindTexture(int id) {
+        int unit = glActiveTexture - GLConst.TEXTURE0;
+        if (unit < 0 || unit >= glBoundTexture.length || glBoundTexture[unit] != id) {
+            gl.bindTexture(WebGL2RenderingContext.TEXTURE_2D, (WebGLTexture) get(textures, id));
+            if (unit >= 0 && unit < glBoundTexture.length) {
+                glBoundTexture[unit] = id;
+            }
+        }
+    }
+
+    private static void vertexAttrib4f(int loc, float x, float y, float z, float w) {
+        float[] v = attribValue[loc];
+        if (v == null) {
+            v = attribValue[loc] = new float[] {Float.NaN, Float.NaN, Float.NaN, Float.NaN};
+        }
+        if (v[0] != x || v[1] != y || v[2] != z || v[3] != w) {
+            gl.vertexAttrib4f(loc, x, y, z, w);
+            v[0] = x;
+            v[1] = y;
+            v[2] = z;
+            v[3] = w;
+        }
+    }
+
     static void trace(String msg) {
         if (trace) {
             LogSink.log(0, "TRACE", "GL", msg, null);
@@ -188,6 +305,25 @@ public final class GLEmu {
 
     public static void enable(int cap) {
         setCap(cap, true);
+    }
+
+    /** glIsEnabled: the emulated fixed-function capabilities from the emulation's state, others from WebGL. */
+    public static boolean isEnabled(int cap) {
+        switch (cap) {
+            case GLConst.TEXTURE_2D: return texture2D[activeTexture];
+            case GLConst.ALPHA_TEST: return alphaTest;
+            case GLConst.FOG: return fog;
+            case GLConst.LIGHTING: return lighting;
+            case GLConst.LIGHT0: return lightEnabled[0];
+            case GLConst.LIGHT1: return lightEnabled[1];
+            case GLConst.COLOR_LOGIC_OP: return colorLogicOp;
+            case GLConst.BLEND: return blend;
+            case GLConst.DEPTH_TEST: case GLConst.CULL_FACE: case GLConst.POLYGON_OFFSET_FILL:
+            case GLConst.SCISSOR_TEST: case GLConst.STENCIL_TEST:
+                return gl.isEnabled(cap);
+            default:
+                return false;
+        }
     }
 
     public static void disable(int cap) {
@@ -463,6 +599,10 @@ public final class GLEmu {
             case GLConst.TEXTURE_MATRIX: src = textureMatrix[activeTexture].top(); break;
             case GLConst.FOG_COLOR: src = fogColor; break;
             case 2816: src = currentColor; break; // GL_CURRENT_COLOR
+            case GLConst.FOG_DENSITY: src = new float[] {fogDensity}; break;
+            case GLConst.FOG_START: src = new float[] {fogStart}; break;
+            case GLConst.FOG_END: src = new float[] {fogEnd}; break;
+            case GLConst.FOG_MODE: src = new float[] {fogMode}; break;
             default: src = new float[16]; break;
         }
         int pos = out.position();
@@ -516,7 +656,7 @@ public final class GLEmu {
 
     public static void activeTexture(int texture) {
         activeTexture = Math.max(0, Math.min(2, texture - GLConst.TEXTURE0));
-        gl.activeTexture(texture);
+        glActive(texture);
     }
 
     public static void clientActiveTexture(int texture) {
@@ -550,6 +690,7 @@ public final class GLEmu {
         if (user) {
             UserProgram up = programs.get(currentProgram);
             useGlProgram(up.program);
+            applyAlphaTest(up);
             bindArrays(first, count, true);
         } else {
             ShaderJit.Program p = jit.get(buildVariant());
@@ -558,7 +699,23 @@ public final class GLEmu {
             bindArrays(first, count, false);
         }
         issue(mode, count);
-        gl.bindBuffer(WebGL2RenderingContext.ARRAY_BUFFER, (WebGLBuffer) get(buffers, arrayBufferBinding));
+        bindArrayBuffer(arrayBufferBinding);
+    }
+
+    /** The fixed-function alpha test, which desktop GL applies after a program's fragment shader too. */
+    private static void applyAlphaTest(UserProgram up) {
+        if (up.alphaFuncLoc == null) {
+            return;
+        }
+        int func = alphaTest && alphaFunc != GLConst.ALWAYS ? alphaFunc : 0;
+        if (up.cAlphaFunc != func) {
+            gl.uniform1i(up.alphaFuncLoc, func);
+            up.cAlphaFunc = func;
+        }
+        if (func != 0 && up.cAlphaRef != alphaRef && up.alphaRefLoc != null) {
+            gl.uniform1f(up.alphaRefLoc, alphaRef);
+            up.cAlphaRef = alphaRef;
+        }
     }
 
     private static void useGlProgram(WebGLProgram program) {
@@ -595,37 +752,82 @@ public final class GLEmu {
 
     private static final float[] normal9 = new float[9];
 
-    private static void uploadUniforms(ShaderJit.Program p) {
-        if (p.mvVersion != modelview.version || p.mv == null || true) {
-            gl.uniformMatrix4fv(p.mv, false, modelview.top());
+    /** Copies v into cache and returns true when they differ (the uniform needs uploading). */
+    private static boolean changed(float[] cache, float[] v, int n) {
+        for (int i = 0; i < n; i++) {
+            if (cache[i] != v[i]) {
+                System.arraycopy(v, 0, cache, 0, n);
+                return true;
+            }
         }
-        gl.uniformMatrix4fv(p.proj, false, projection.top());
+        return false;
+    }
+
+    private static boolean changed(float[] cache, float x, float y, float z, float w, int n) {
+        if (cache[0] != x || n > 1 && cache[1] != y || n > 2 && cache[2] != z || n > 3 && cache[3] != w) {
+            cache[0] = x;
+            if (n > 1) {
+                cache[1] = y;
+            }
+            if (n > 2) {
+                cache[2] = z;
+            }
+            if (n > 3) {
+                cache[3] = w;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static void uploadUniforms(ShaderJit.Program p) {
+        float[] mv = modelview.top();
+        if (p.mv != null && changed(p.cMv, mv, 16)) {
+            gl.uniformMatrix4fv(p.mv, false, mv);
+        }
+        float[] proj = projection.top();
+        if (changed(p.cProj, proj, 16)) {
+            gl.uniformMatrix4fv(p.proj, false, proj);
+        }
         ShaderJit.Variant v = p.variant;
         for (int u = 0; u < 3; u++) {
             if ((v.texMask & (1 << u)) != 0) {
-                gl.uniformMatrix4fv(p.texMat[u], false, textureMatrix[u].top());
+                float[] tm = textureMatrix[u].top();
+                if (changed(p.cTexMat[u], tm, 16)) {
+                    gl.uniformMatrix4fv(p.texMat[u], false, tm);
+                }
                 if (p.envColor[u] != null) {
                     float[] c = texEnv[u].color;
-                    gl.uniform4f(p.envColor[u], c[0], c[1], c[2], c[3]);
+                    if (changed(p.cEnvColor[u], c, 4)) {
+                        gl.uniform4f(p.envColor[u], c[0], c[1], c[2], c[3]);
+                    }
                 }
                 for (int c = 0; c < 4; c++) {
                     if (p.texGenPlane[u][c] != null) {
                         float[] pl = texGenPlane[u][c];
-                        gl.uniform4f(p.texGenPlane[u][c], pl[0], pl[1], pl[2], pl[3]);
+                        if (changed(p.cTexGen[u][c], pl, 4)) {
+                            gl.uniform4f(p.texGenPlane[u][c], pl[0], pl[1], pl[2], pl[3]);
+                        }
                     }
                 }
             }
         }
-        if (p.alphaRef != null) {
+        if (p.alphaRef != null && changed(p.cAlphaRef, alphaRef, 0, 0, 0, 1)) {
             gl.uniform1f(p.alphaRef, alphaRef);
         }
         if (p.fogColor != null) {
-            gl.uniform4f(p.fogColor, fogColor[0], fogColor[1], fogColor[2], fogColor[3]);
-            gl.uniform3f(p.fogParams, fogStart, fogEnd, fogDensity);
+            if (changed(p.cFogColor, fogColor, 4)) {
+                gl.uniform4f(p.fogColor, fogColor[0], fogColor[1], fogColor[2], fogColor[3]);
+            }
+            if (changed(p.cFogParams, fogStart, fogEnd, fogDensity, 0, 3)) {
+                gl.uniform3f(p.fogParams, fogStart, fogEnd, fogDensity);
+            }
         }
         if (v.lighting) {
-            Mat4.normalMatrix(modelview.top(), normal9);
-            gl.uniformMatrix3fv(p.normal, false, normal9);
+            Mat4.normalMatrix(mv, normal9);
+            if (changed(p.cNormal, normal9, 9)) {
+                gl.uniformMatrix3fv(p.normal, false, normal9);
+            }
             float ar = lightModelAmbient[0];
             float ag = lightModelAmbient[1];
             float ab = lightModelAmbient[2];
@@ -639,18 +841,29 @@ public final class GLEmu {
                     if (len == 0) {
                         len = 1;
                     }
-                    gl.uniform3f(p.lightDir[i], pos[0] / len, pos[1] / len, pos[2] / len);
-                    gl.uniform3f(p.lightDiffuse[i], lightDiffuse[i][0], lightDiffuse[i][1], lightDiffuse[i][2]);
+                    if (changed(p.cLightDir[i], pos[0] / len, pos[1] / len, pos[2] / len, 0, 3)) {
+                        gl.uniform3f(p.lightDir[i], pos[0] / len, pos[1] / len, pos[2] / len);
+                    }
+                    float[] d = lightDiffuse[i];
+                    if (changed(p.cLightDiffuse[i], d[0], d[1], d[2], 0, 3)) {
+                        gl.uniform3f(p.lightDiffuse[i], d[0], d[1], d[2]);
+                    }
                 }
             }
-            gl.uniform3f(p.lightAmbient, ar, ag, ab);
+            if (changed(p.cLightAmbient, ar, ag, ab, 0, 3)) {
+                gl.uniform3f(p.lightAmbient, ar, ag, ab);
+            }
         }
     }
 
     /** Streams client-memory arrays into the stream VBO and wires attribute locations. */
+    private static final ArrayPtr[] drawArrays = new ArrayPtr[16];
+    private static final int[] drawLocations = new int[16];
+    private static final boolean[] drawUsed = new boolean[16];
+
     private static void bindArrays(int first, int count, boolean user) {
-        ArrayPtr[] arrays = new ArrayPtr[16];
-        int[] locations = new int[16];
+        ArrayPtr[] arrays = drawArrays;
+        int[] locations = drawLocations;
         int n = 0;
         if (user) {
             boolean usedZero = false;
@@ -690,11 +903,12 @@ public final class GLEmu {
             }
         }
         if (maxEnd > 0) {
-            gl.bindBuffer(WebGL2RenderingContext.ARRAY_BUFFER, streamVbo);
+            bindArrayBuffer(STREAM_VBO);
             gl.bufferData(WebGL2RenderingContext.ARRAY_BUFFER, NativeMemory.u8(minStart, (int) (maxEnd - minStart)),
                     WebGL2RenderingContext.STREAM_DRAW);
         }
-        boolean[] used = new boolean[16];
+        boolean[] used = drawUsed;
+        java.util.Arrays.fill(used, false);
         for (int i = 0; i < n; i++) {
             ArrayPtr a = arrays[i];
             int loc = locations[i];
@@ -704,18 +918,31 @@ public final class GLEmu {
             used[loc] = true;
             int stride = strideOf(a);
             long offset;
+            int buffer;
             if (a.buffer == 0) {
-                gl.bindBuffer(WebGL2RenderingContext.ARRAY_BUFFER, streamVbo);
+                buffer = STREAM_VBO;
                 offset = a.pointer + (long) first * stride - minStart;
             } else {
-                gl.bindBuffer(WebGL2RenderingContext.ARRAY_BUFFER, (WebGLBuffer) get(buffers, a.buffer));
+                buffer = a.buffer;
                 offset = a.pointer + (long) first * stride;
             }
             boolean normalized = a.normalized;
             if (!user && (loc == ShaderJit.A_COLOR || loc == ShaderJit.A_NORMAL)) {
                 normalized = a.type != GLConst.FLOAT;
             }
-            gl.vertexAttribPointer(loc, a.size, a.type, normalized, stride, (int) offset);
+            if (!attrValid[loc] || attrBuffer[loc] != buffer || attrSize[loc] != a.size || attrType[loc] != a.type
+                    || attrNormalized[loc] != normalized || attrStride[loc] != stride
+                    || attrOffset[loc] != (int) offset) {
+                bindArrayBuffer(buffer);
+                gl.vertexAttribPointer(loc, a.size, a.type, normalized, stride, (int) offset);
+                attrValid[loc] = true;
+                attrBuffer[loc] = buffer;
+                attrSize[loc] = a.size;
+                attrType[loc] = a.type;
+                attrNormalized[loc] = normalized;
+                attrStride[loc] = stride;
+                attrOffset[loc] = (int) offset;
+            }
             if (!attribEnabled[loc]) {
                 gl.enableVertexAttribArray(loc);
                 attribEnabled[loc] = true;
@@ -729,16 +956,16 @@ public final class GLEmu {
         }
         if (!user) {
             if (!used[ShaderJit.A_COLOR]) {
-                gl.vertexAttrib4f(ShaderJit.A_COLOR, currentColor[0], currentColor[1], currentColor[2],
+                vertexAttrib4f(ShaderJit.A_COLOR, currentColor[0], currentColor[1], currentColor[2],
                         currentColor[3]);
             }
             if (!used[ShaderJit.A_NORMAL]) {
-                gl.vertexAttrib4f(ShaderJit.A_NORMAL, currentNormal[0], currentNormal[1], currentNormal[2], 0);
+                vertexAttrib4f(ShaderJit.A_NORMAL, currentNormal[0], currentNormal[1], currentNormal[2], 0);
             }
             for (int u = 0; u < 3; u++) {
                 if (!used[ShaderJit.A_TEX0 + u]) {
                     float[] t = currentTexCoord[u];
-                    gl.vertexAttrib4f(ShaderJit.A_TEX0 + u, t[0], t[1], t[2], t[3]);
+                    vertexAttrib4f(ShaderJit.A_TEX0 + u, t[0], t[1], t[2], t[3]);
                 }
             }
         }
@@ -749,7 +976,7 @@ public final class GLEmu {
             case GLConst.QUADS: {
                 int quads = count / 4;
                 ensureQuadIndices(quads);
-                gl.bindBuffer(WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER, quadIbo);
+                bindElementBuffer(QUAD_IBO);
                 gl.drawElements(WebGL2RenderingContext.TRIANGLES, quads * 6, WebGL2RenderingContext.UNSIGNED_INT, 0);
                 break;
             }
@@ -781,7 +1008,7 @@ public final class GLEmu {
             indices.set(i + 4, v + 2);
             indices.set(i + 5, v + 3);
         }
-        gl.bindBuffer(WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER, quadIbo);
+        bindElementBuffer(QUAD_IBO);
         gl.bufferData(WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER, indices, WebGL2RenderingContext.STATIC_DRAW);
         quadIboQuads = capacity;
     }
@@ -797,17 +1024,44 @@ public final class GLEmu {
         if (b != null) {
             gl.deleteBuffer((WebGLBuffer) b);
             buffers.set(id, null);
+            if (glArrayBuffer == id) {
+                glArrayBuffer = UNKNOWN;
+            }
+            if (glElementBuffer == id) {
+                glElementBuffer = UNKNOWN;
+            }
+            for (int loc = 0; loc < 16; loc++) {
+                if (attrBuffer[loc] == id) {
+                    attrValid[loc] = false;
+                    attrBuffer[loc] = UNKNOWN;
+                }
+            }
         }
         if (arrayBufferBinding == id) {
             arrayBufferBinding = 0;
         }
     }
 
+    /** Buffer ids bound to targets other than GL_ARRAY_BUFFER, by target, for the binding queries. */
+    private static final java.util.Map<Integer, Integer> bufferBindings = new java.util.HashMap<>();
+
     public static void bindBuffer(int target, int id) {
         if (target == GLConst.ARRAY_BUFFER) {
             arrayBufferBinding = id;
+            bindArrayBuffer(id);
+            return;
         }
-        gl.bindBuffer(target, (WebGLBuffer) get(buffers, id));
+        bufferBindings.put(target, id);
+        if (target == WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER) {
+            bindElementBuffer(id);
+        } else {
+            gl.bindBuffer(target, (WebGLBuffer) get(buffers, id));
+        }
+    }
+
+    private static int bufferBinding(int target) {
+        Integer id = bufferBindings.get(target);
+        return id == null ? 0 : id;
     }
 
     public static void bufferData(int target, ByteBuffer data, int usage) {
@@ -842,6 +1096,14 @@ public final class GLEmu {
         if (t != null) {
             gl.deleteTexture((WebGLTexture) t);
             textures.set(id, null);
+            for (int u = 0; u < glBoundTexture.length; u++) {
+                if (glBoundTexture[u] == id) {
+                    glBoundTexture[u] = UNKNOWN;
+                }
+            }
+            if (id < texParams.length) {
+                texParams[id] = null;
+            }
         }
         for (int u = 0; u < 3; u++) {
             if (boundTexture[u] == id) {
@@ -852,7 +1114,21 @@ public final class GLEmu {
 
     public static void bindTexture(int target, int id) {
         boundTexture[activeTexture] = id;
-        gl.bindTexture(WebGL2RenderingContext.TEXTURE_2D, (WebGLTexture) get(textures, id));
+        glBindTexture(id);
+    }
+
+    private static int texParamSlot(int pname) {
+        switch (pname) {
+            case 10240: return 0; // MAG_FILTER
+            case 10241: return 1; // MIN_FILTER
+            case 10242: return 2; // WRAP_S
+            case 10243: return 3; // WRAP_T
+            case 33084: return 4; // BASE_LEVEL
+            case 33085: return 5; // MAX_LEVEL
+            case 34892: return 6; // COMPARE_MODE
+            case 34893: return 7; // COMPARE_FUNC
+            default: return -1;
+        }
     }
 
     public static void texParameteri(int target, int pname, int param) {
@@ -867,6 +1143,21 @@ public final class GLEmu {
                 break;
             default:
                 break;
+        }
+        int id = boundTexture[activeTexture];
+        int slot = texParamSlot(pname);
+        if (slot >= 0 && id > 0) {
+            if (id >= texParams.length) {
+                texParams = java.util.Arrays.copyOf(texParams, Math.max(id + 1, texParams.length * 2));
+            }
+            int[] cached = texParams[id];
+            if (cached == null) {
+                cached = texParams[id] = filled(8, Integer.MIN_VALUE);
+            }
+            if (cached[slot] == param) {
+                return;
+            }
+            cached[slot] = param;
         }
         gl.texParameteri(WebGL2RenderingContext.TEXTURE_2D, pname, param);
     }
@@ -918,8 +1209,10 @@ public final class GLEmu {
             return;
         }
         int[] f = textureFormat(internal, format, type);
-        trace("texImage2D tex=" + boundTexture[activeTexture] + " lvl=" + level + " " + width + "x" + height
-                + " fmt=" + f[0] + " data=" + (pixels != null));
+        if (trace) {
+            trace("texImage2D tex=" + boundTexture[activeTexture] + " lvl=" + level + " " + width + "x" + height
+                    + " fmt=" + f[0] + " data=" + (pixels != null));
+        }
         ArrayBufferView view = null;
         if (pixels != null && NativeMemory.isNative(pixels)) {
             int bytes = width * height * bytesPerPixel(f[1], f[2]);
@@ -936,9 +1229,11 @@ public final class GLEmu {
 
     public static void texSubImage2D(int target, int level, int x, int y, int width, int height, int format,
             int type, long pixels) {
-        trace("texSubImage2D tex=" + boundTexture[activeTexture] + " lvl=" + level + " @" + x + "," + y + " "
-                + width + "x" + height + " ptr=" + pixels + " row=" + unpackRowLength + " skip=" + unpackSkipPixels
-                + "," + unpackSkipRows);
+        if (trace) {
+            trace("texSubImage2D tex=" + boundTexture[activeTexture] + " lvl=" + level + " @" + x + "," + y + " "
+                    + width + "x" + height + " ptr=" + pixels + " row=" + unpackRowLength + " skip="
+                    + unpackSkipPixels + "," + unpackSkipRows);
+        }
         int bpp = bytesPerPixel(format, type);
         int rowLength = unpackRowLength > 0 ? unpackRowLength : width;
         long bytes = ((long) (unpackSkipRows + height - 1) * rowLength + unpackSkipPixels + width) * bpp;
@@ -994,6 +1289,24 @@ public final class GLEmu {
             case 3317: case 3333: case 3330: case 3331: case 3332: break; // alignment, pack params
             case 3312: case 3313: return; // UNPACK_SWAP_BYTES / LSB_FIRST: unsupported
             default: break;
+        }
+        int slot;
+        switch (pname) {
+            case 3314: slot = 0; break;
+            case 3315: slot = 1; break;
+            case 3316: slot = 2; break;
+            case 3317: slot = 3; break;
+            case 3330: slot = 4; break;
+            case 3331: slot = 5; break;
+            case 3332: slot = 6; break;
+            case 3333: slot = 7; break;
+            default: slot = -1; break;
+        }
+        if (slot >= 0) {
+            if (pixelStore[slot] == value) {
+                return;
+            }
+            pixelStore[slot] = value;
         }
         gl.pixelStorei(pname, value);
     }
@@ -1097,6 +1410,18 @@ public final class GLEmu {
             case 3379: return intParams.getOrDefault(3379, 4096);
             case 34930: return 16; // GL_MAX_TEXTURE_IMAGE_UNITS
             case 34018: return 3; // GL_MAX_TEXTURE_UNITS
+            // Fixed-function and emulated state, which WebGL cannot answer (Sodium reads the fog this way).
+            case GLConst.FOG_MODE: return fogMode;
+            case GLConst.FOG: case GLConst.ALPHA_TEST: case GLConst.LIGHTING: case GLConst.TEXTURE_2D:
+            case GLConst.LIGHT0: case GLConst.LIGHT1: case GLConst.COLOR_LOGIC_OP:
+                return isEnabled(pname) ? 1 : 0; // glGetBoolean of a capability
+            case 34229: return boundVertexArray; // GL_VERTEX_ARRAY_BINDING
+            case 34965: return bufferBinding(WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER);
+            case 36662: return bufferBinding(36662); // GL_COPY_READ_BUFFER_BINDING
+            case 36663: return bufferBinding(36663); // GL_COPY_WRITE_BUFFER_BINDING
+            case 35053: return bufferBinding(35051); // GL_PIXEL_PACK_BUFFER_BINDING
+            case 35055: return bufferBinding(35052); // GL_PIXEL_UNPACK_BUFFER_BINDING
+            case 35368: return bufferBinding(35345); // GL_UNIFORM_BUFFER_BINDING
             default:
                 try {
                     return gl.getParameteri(pname);
@@ -1144,13 +1469,13 @@ public final class GLEmu {
         for (int u = 0; u < 3; u++) {
             texEnv[u].copyFrom(envs[u]);
             if (bound[u] != boundTexture[u]) {
-                gl.activeTexture(GLConst.TEXTURE0 + u);
+                glActive(GLConst.TEXTURE0 + u);
                 boundTexture[u] = bound[u];
-                gl.bindTexture(WebGL2RenderingContext.TEXTURE_2D, (WebGLTexture) get(textures, bound[u]));
+                glBindTexture(bound[u]);
             }
         }
         activeTexture = (Integer) s[3];
-        gl.activeTexture(GLConst.TEXTURE0 + activeTexture);
+        glActive(GLConst.TEXTURE0 + activeTexture);
         boolean[] f = (boolean[]) s[4];
         alphaTest = f[0];
         fog = f[1];
@@ -1241,11 +1566,17 @@ public final class GLEmu {
 
     public static void linkProgram(int program) {
         UserProgram p = programs.get(program);
-        if (p.firstAttribute != null) {
+        if (p.firstAttribute != null && !p.explicitAttributes) {
             gl.bindAttribLocation(p.program, 0, p.firstAttribute);
         }
         gl.linkProgram(p.program);
         p.linked = gl.getProgramParameterb(p.program, WebGL2RenderingContext.LINK_STATUS);
+        if (p.linked) {
+            p.alphaFuncLoc = gl.getUniformLocation(p.program, GlslTranslator.ALPHA_FUNC);
+            p.alphaRefLoc = gl.getUniformLocation(p.program, GlslTranslator.ALPHA_REF);
+            p.cAlphaFunc = 0;
+            p.cAlphaRef = Float.NaN;
+        }
         String log = gl.getProgramInfoLog(p.program);
         p.log = log == null ? "" : log;
         if (!p.linked) {
@@ -1374,6 +1705,77 @@ public final class GLEmu {
     }
 
     // ------------------------------------------------------------------ helpers for LWJGL front-ends
+
+    public static void bindAttribLocation(int program, int index, CharSequence name) {
+        UserProgram p = programs.get(program);
+        p.explicitAttributes = true;
+        gl.bindAttribLocation(p.program, index, name.toString());
+    }
+
+    public static void uniform1f(int location, float x) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform1f(l, x);
+        }
+    }
+
+    public static void uniform2f(int location, float x, float y) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform2f(l, x, y);
+        }
+    }
+
+    public static void uniform3f(int location, float x, float y, float z) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform3f(l, x, y, z);
+        }
+    }
+
+    public static void uniform4f(int location, float x, float y, float z, float w) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform4f(l, x, y, z, w);
+        }
+    }
+
+    /** glVertexAttrib4f for a generic attribute: the value used while its array is disabled. */
+    public static void genericAttrib4f(int index, float x, float y, float z, float w) {
+        vertexAttrib4f(index, x, y, z, w);
+    }
+
+    public static void multiDrawArrays(int mode, IntBuffer first, IntBuffer count) {
+        int n = Math.min(first.remaining(), count.remaining());
+        for (int i = 0; i < n; i++) {
+            drawArrays(mode, first.get(first.position() + i), count.get(count.position() + i));
+        }
+    }
+
+    public static void copyBufferSubData(int readTarget, int writeTarget, long readOffset, long writeOffset, long size) {
+        gl.copyBufferSubData(readTarget, writeTarget, (int) readOffset, (int) writeOffset, (int) size);
+    }
+
+    public static void vertexAttribDivisor(int index, int divisor) {
+        gl.vertexAttribDivisor(index, divisor);
+    }
+
+    /** nglShaderSource: count strings at the 8-byte pointers in strings, lengths (ints) or NUL-terminated. */
+    public static void shaderSource(int shader, int count, long strings, long lengths) {
+        StringBuilder source = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            long p = NativeMemory.getLong(strings + i * 8L);
+            int len = lengths != 0 ? NativeMemory.getInt(lengths + i * 4L) : -1;
+            if (len < 0) {
+                source.append(NativeMemory.utf8(p));
+            } else {
+                byte[] b = new byte[len];
+                NativeMemory.copyToArray(p, b, 0, len);
+                source.append(new String(b, java.nio.charset.StandardCharsets.UTF_8));
+            }
+        }
+        shaderSource(shader, source);
+    }
 
     public static float[] readFloats(FloatBuffer b, int max) {
         int n = Math.min(max, b.remaining());

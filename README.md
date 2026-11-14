@@ -421,4 +421,14 @@ Not working yet / known issues:
   authentication is not available.
 * Performance: the module is compiled with TeaVM's `ADVANCED` optimisation (72 MB instead of 106 MB with
   `SIMPLE`; measured in headless Chromium: title screen after 11.0 s instead of 12.9 s, a new world ready
-  after 43 s instead of 63 s). Rendering work (uniform caching, streaming buffers) has not started.
+  after 43 s instead of 63 s). The WebGL emulation skips redundant calls: it keeps the state it last
+  set (texture parameters per texture, pixel store, buffer and texture bindings, attribute pointers and
+  values) and each fixed-function program remembers its uniform values. Counted in a singleplayer world,
+  WebGL calls per frame fell from about 9,000 to about 1,450 (texParameteri 2,981 to 9, pixelStorei 2,911
+  to 135, mostly from animated textures), and the frame rate under software rendering from 3.7 to 6.5.
+* Lighter video settings for the browser (`WebDefaults`): once per player, options still at vanilla's
+  default become render distance 6, biome blend 3×3, mipmap levels 2, fast clouds and decreased
+  particles; options a player changed are kept.
+* WebGPU: not used. A CPU profile of a world shows the time in Minecraft's own code and the browser, not
+  in the GL emulation (0.3%), so a WebGPU backend would not make the game itself faster, and the slow
+  devices this is played on often have no WebGPU at all.

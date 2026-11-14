@@ -83,6 +83,27 @@ final class ShaderJit {
         int mvVersion = -1;
         int projVersion = -1;
         final int[] texVersion = {-1, -1, -1};
+        // values last uploaded into this program (uniforms keep their values per program): unchanged
+        // uniforms are not uploaded again. NaN never compares equal, so the first upload always happens.
+        final float[] cMv = nan(16);
+        final float[] cProj = nan(16);
+        final float[] cNormal = nan(9);
+        final float[][] cTexMat = {nan(16), nan(16), nan(16)};
+        final float[][] cEnvColor = {nan(4), nan(4), nan(4)};
+        final float[][][] cTexGen = {{nan(4), nan(4), nan(4), nan(4)}, {nan(4), nan(4), nan(4), nan(4)},
+                {nan(4), nan(4), nan(4), nan(4)}};
+        final float[] cAlphaRef = nan(1);
+        final float[] cFogColor = nan(4);
+        final float[] cFogParams = nan(3);
+        final float[] cLightAmbient = nan(3);
+        final float[][] cLightDir = {nan(3), nan(3)};
+        final float[][] cLightDiffuse = {nan(3), nan(3)};
+
+        private static float[] nan(int n) {
+            float[] a = new float[n];
+            java.util.Arrays.fill(a, Float.NaN);
+            return a;
+        }
     }
 
     private final WebGL2RenderingContext gl;
