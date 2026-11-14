@@ -363,7 +363,11 @@ involved while baking; `SodiumCompat` and the WebGL emulation do the rest):
   through reflection. The classes are defined at build time and the calls are direct.
 * **Lithium**: its initializer checked a config that its mixin plugin (which runs at build time here) fills;
   that check is dropped. It asks entity classes whether they override two collision methods
-  (`getDeclaredMethod`); those methods keep reflection metadata (`TeaFabricReflection`).
+  (`getDeclaredMethod`); those methods keep reflection metadata (`TeaFabricReflection`). Its
+  point-of-interest search streams a `BitSet` into `flatMap`, which exposed a TeaVM bug: `BitSet.stream()`
+  repeated its current bit forever under a lazy consumer, so a bee looking for a hive collected the same
+  nests until the array overflowed and the page froze for minutes. `BitSet.stream` is redirected to a
+  correct version (`LangCompat`).
 * **Phosphor** uses `StampedLock`, which TeaVM's class library lacks: added for green threads
   (`compiler/src/runtime`).
 * **Sodium** renders with its *Oneshot* backend (one draw per chunk section; its multi-draw backend needs
@@ -375,9 +379,17 @@ involved while baking; `SodiumCompat` and the WebGL emulation do the rest):
   emulation; its video settings no longer offer Fabulous!; its F3 memory line shows the JavaScript heap.
   Sodium finds no `sun.misc.Unsafe` and uses its NIO vertex writers.
 
-Measured in headless Chromium with software rendering, the same build with and without the four mods
-(two runs each, a new random world each run): a new world was ready 22–24 s after Create World with the
-mods, 46–47 s without. Frame rates 20 s after joining varied more between random worlds (2.9–6.5 fps either way) than between the builds, because chunks were still loading.
+Measured in headless Chromium with software rendering (SwiftShader), the same build with and without the
+four mods, a new random world each run:
+
+* a new world was ready 22–24 s after Create World with the mods, 39–47 s without;
+* WebGL calls per frame a minute into the world: 924 instead of 1,495. Sodium updates animated textures
+  only while they are visible (texSubImage2D 458 per frame to none); its per-chunk draws set their
+  attribute pointers each time (vertexAttribPointer 175 to 212);
+* JavaScript heap a minute in: 420–444 MB with the mods, 466–498 MB without (FerriteCore);
+* frame rate a minute in: 3–10 fps with the mods, 4–9 fps without, no difference these runs can show:
+  software rendering draws the pixels on the CPU, and the random worlds differ more than the builds. On a
+  real GPU the saved WebGL calls and texture uploads should count for more; that was not measured.
 
 **Iris (shader packs) does not work** and is not a matter of adapting the mod: shader packs are written for
 desktop OpenGL's compatibility profile (built-in matrices and vertex inputs such as `gl_ModelViewMatrix`
