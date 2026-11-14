@@ -157,13 +157,19 @@ public final class GLEmu {
 
     // ---- WebGL state as last set, so that redundant calls are skipped (Minecraft re-sets texture
     // parameters, pixel-store state, vertex attributes and uniforms far more often than they change).
-    private static JSObject glArrayBuffer;
-    private static JSObject glElementBuffer;
+    // Buffers and textures are tracked by id (Java arrays of JS objects do not compile in Wasm GC):
+    // ids of the tables below, STREAM_VBO / QUAD_IBO for the emulation's own buffers, UNKNOWN when the
+    // WebGL state is not known (the next bind is always issued).
+    private static final int STREAM_VBO = -1;
+    private static final int QUAD_IBO = -2;
+    private static final int UNKNOWN = Integer.MIN_VALUE;
+    private static int glArrayBuffer = UNKNOWN;
+    private static int glElementBuffer = UNKNOWN;
     private static int glActiveTexture = GLConst.TEXTURE0;
-    private static final JSObject[] glBoundTexture = new JSObject[32];
+    private static final int[] glBoundTexture = filled(32, UNKNOWN);
     private static final int[] pixelStore = filled(8, Integer.MIN_VALUE);
     private static int[][] texParams = new int[256][];
-    private static final JSObject[] attrBuffer = new JSObject[16];
+    private static final int[] attrBuffer = filled(16, UNKNOWN);
     private static final int[] attrSize = new int[16];
     private static final int[] attrType = new int[16];
     private static final int[] attrStride = new int[16];
@@ -178,17 +184,21 @@ public final class GLEmu {
         return a;
     }
 
-    private static void bindArrayBuffer(JSObject b) {
-        if (glArrayBuffer != b) {
-            gl.bindBuffer(WebGL2RenderingContext.ARRAY_BUFFER, (WebGLBuffer) b);
-            glArrayBuffer = b;
+    private static WebGLBuffer bufferObject(int id) {
+        return id == STREAM_VBO ? streamVbo : id == QUAD_IBO ? quadIbo : (WebGLBuffer) get(buffers, id);
+    }
+
+    private static void bindArrayBuffer(int id) {
+        if (glArrayBuffer != id) {
+            gl.bindBuffer(WebGL2RenderingContext.ARRAY_BUFFER, bufferObject(id));
+            glArrayBuffer = id;
         }
     }
 
-    private static void bindElementBuffer(JSObject b) {
-        if (glElementBuffer != b) {
-            gl.bindBuffer(WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER, (WebGLBuffer) b);
-            glElementBuffer = b;
+    private static void bindElementBuffer(int id) {
+        if (glElementBuffer != id) {
+            gl.bindBuffer(WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER, bufferObject(id));
+            glElementBuffer = id;
         }
     }
 
@@ -199,12 +209,12 @@ public final class GLEmu {
         }
     }
 
-    private static void glBindTexture(JSObject t) {
+    private static void glBindTexture(int id) {
         int unit = glActiveTexture - GLConst.TEXTURE0;
-        if (unit < 0 || unit >= glBoundTexture.length || glBoundTexture[unit] != t) {
-            gl.bindTexture(WebGL2RenderingContext.TEXTURE_2D, (WebGLTexture) t);
+        if (unit < 0 || unit >= glBoundTexture.length || glBoundTexture[unit] != id) {
+            gl.bindTexture(WebGL2RenderingContext.TEXTURE_2D, (WebGLTexture) get(textures, id));
             if (unit >= 0 && unit < glBoundTexture.length) {
-                glBoundTexture[unit] = t;
+                glBoundTexture[unit] = id;
             }
         }
     }
@@ -626,7 +636,7 @@ public final class GLEmu {
             bindArrays(first, count, false);
         }
         issue(mode, count);
-        bindArrayBuffer(get(buffers, arrayBufferBinding));
+        bindArrayBuffer(arrayBufferBinding);
     }
 
     private static void useGlProgram(WebGLProgram program) {
@@ -814,7 +824,7 @@ public final class GLEmu {
             }
         }
         if (maxEnd > 0) {
-            bindArrayBuffer(streamVbo);
+            bindArrayBuffer(STREAM_VBO);
             gl.bufferData(WebGL2RenderingContext.ARRAY_BUFFER, NativeMemory.u8(minStart, (int) (maxEnd - minStart)),
                     WebGL2RenderingContext.STREAM_DRAW);
         }
@@ -829,12 +839,12 @@ public final class GLEmu {
             used[loc] = true;
             int stride = strideOf(a);
             long offset;
-            JSObject buffer;
+            int buffer;
             if (a.buffer == 0) {
-                buffer = streamVbo;
+                buffer = STREAM_VBO;
                 offset = a.pointer + (long) first * stride - minStart;
             } else {
-                buffer = get(buffers, a.buffer);
+                buffer = a.buffer;
                 offset = a.pointer + (long) first * stride;
             }
             boolean normalized = a.normalized;
@@ -887,7 +897,7 @@ public final class GLEmu {
             case GLConst.QUADS: {
                 int quads = count / 4;
                 ensureQuadIndices(quads);
-                bindElementBuffer(quadIbo);
+                bindElementBuffer(QUAD_IBO);
                 gl.drawElements(WebGL2RenderingContext.TRIANGLES, quads * 6, WebGL2RenderingContext.UNSIGNED_INT, 0);
                 break;
             }
@@ -919,7 +929,7 @@ public final class GLEmu {
             indices.set(i + 4, v + 2);
             indices.set(i + 5, v + 3);
         }
-        bindElementBuffer(quadIbo);
+        bindElementBuffer(QUAD_IBO);
         gl.bufferData(WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER, indices, WebGL2RenderingContext.STATIC_DRAW);
         quadIboQuads = capacity;
     }
@@ -935,16 +945,16 @@ public final class GLEmu {
         if (b != null) {
             gl.deleteBuffer((WebGLBuffer) b);
             buffers.set(id, null);
-            if (glArrayBuffer == b) {
-                glArrayBuffer = null;
+            if (glArrayBuffer == id) {
+                glArrayBuffer = UNKNOWN;
             }
-            if (glElementBuffer == b) {
-                glElementBuffer = null;
+            if (glElementBuffer == id) {
+                glElementBuffer = UNKNOWN;
             }
             for (int loc = 0; loc < 16; loc++) {
-                if (attrBuffer[loc] == b) {
+                if (attrBuffer[loc] == id) {
                     attrValid[loc] = false;
-                    attrBuffer[loc] = null;
+                    attrBuffer[loc] = UNKNOWN;
                 }
             }
         }
@@ -956,9 +966,9 @@ public final class GLEmu {
     public static void bindBuffer(int target, int id) {
         if (target == GLConst.ARRAY_BUFFER) {
             arrayBufferBinding = id;
-            bindArrayBuffer(get(buffers, id));
+            bindArrayBuffer(id);
         } else if (target == WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER) {
-            bindElementBuffer(get(buffers, id));
+            bindElementBuffer(id);
         } else {
             gl.bindBuffer(target, (WebGLBuffer) get(buffers, id));
         }
@@ -997,8 +1007,8 @@ public final class GLEmu {
             gl.deleteTexture((WebGLTexture) t);
             textures.set(id, null);
             for (int u = 0; u < glBoundTexture.length; u++) {
-                if (glBoundTexture[u] == t) {
-                    glBoundTexture[u] = null;
+                if (glBoundTexture[u] == id) {
+                    glBoundTexture[u] = UNKNOWN;
                 }
             }
             if (id < texParams.length) {
@@ -1014,7 +1024,7 @@ public final class GLEmu {
 
     public static void bindTexture(int target, int id) {
         boundTexture[activeTexture] = id;
-        glBindTexture(get(textures, id));
+        glBindTexture(id);
     }
 
     private static int texParamSlot(int pname) {
@@ -1359,7 +1369,7 @@ public final class GLEmu {
             if (bound[u] != boundTexture[u]) {
                 glActive(GLConst.TEXTURE0 + u);
                 boundTexture[u] = bound[u];
-                glBindTexture(get(textures, bound[u]));
+                glBindTexture(bound[u]);
             }
         }
         activeTexture = (Integer) s[3];
