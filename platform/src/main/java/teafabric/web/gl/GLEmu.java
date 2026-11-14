@@ -120,15 +120,20 @@ public final class GLEmu {
         return vertexArrays.size() - 1;
     }
 
+    /** The emulated vertex array object bound (0: none), for glGetInteger(GL_VERTEX_ARRAY_BINDING). */
+    private static int boundVertexArray;
+
     public static void bindVertexArray(int id) {
         ArrayPtr[] a = id > 0 && id < vertexArrays.size() ? vertexArrays.get(id) : null;
         genericArray = a != null ? a : defaultGenericArray;
+        boundVertexArray = a != null ? id : 0;
     }
 
     public static void deleteVertexArrays(int id) {
         if (id > 0 && id < vertexArrays.size() && vertexArrays.get(id) != null) {
             if (genericArray == vertexArrays.get(id)) {
                 genericArray = defaultGenericArray;
+                boundVertexArray = 0;
             }
             vertexArrays.set(id, null);
         }
@@ -295,6 +300,25 @@ public final class GLEmu {
 
     public static void enable(int cap) {
         setCap(cap, true);
+    }
+
+    /** glIsEnabled: the emulated fixed-function capabilities from the emulation's state, others from WebGL. */
+    public static boolean isEnabled(int cap) {
+        switch (cap) {
+            case GLConst.TEXTURE_2D: return texture2D[activeTexture];
+            case GLConst.ALPHA_TEST: return alphaTest;
+            case GLConst.FOG: return fog;
+            case GLConst.LIGHTING: return lighting;
+            case GLConst.LIGHT0: return lightEnabled[0];
+            case GLConst.LIGHT1: return lightEnabled[1];
+            case GLConst.COLOR_LOGIC_OP: return colorLogicOp;
+            case GLConst.BLEND: return blend;
+            case GLConst.DEPTH_TEST: case GLConst.CULL_FACE: case GLConst.POLYGON_OFFSET_FILL:
+            case GLConst.SCISSOR_TEST: case GLConst.STENCIL_TEST:
+                return gl.isEnabled(cap);
+            default:
+                return false;
+        }
     }
 
     public static void disable(int cap) {
@@ -570,6 +594,10 @@ public final class GLEmu {
             case GLConst.TEXTURE_MATRIX: src = textureMatrix[activeTexture].top(); break;
             case GLConst.FOG_COLOR: src = fogColor; break;
             case 2816: src = currentColor; break; // GL_CURRENT_COLOR
+            case GLConst.FOG_DENSITY: src = new float[] {fogDensity}; break;
+            case GLConst.FOG_START: src = new float[] {fogStart}; break;
+            case GLConst.FOG_END: src = new float[] {fogEnd}; break;
+            case GLConst.FOG_MODE: src = new float[] {fogMode}; break;
             default: src = new float[16]; break;
         }
         int pos = out.position();
@@ -992,15 +1020,26 @@ public final class GLEmu {
         }
     }
 
+    /** Buffer ids bound to targets other than GL_ARRAY_BUFFER, by target, for the binding queries. */
+    private static final java.util.Map<Integer, Integer> bufferBindings = new java.util.HashMap<>();
+
     public static void bindBuffer(int target, int id) {
         if (target == GLConst.ARRAY_BUFFER) {
             arrayBufferBinding = id;
             bindArrayBuffer(id);
-        } else if (target == WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER) {
+            return;
+        }
+        bufferBindings.put(target, id);
+        if (target == WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER) {
             bindElementBuffer(id);
         } else {
             gl.bindBuffer(target, (WebGLBuffer) get(buffers, id));
         }
+    }
+
+    private static int bufferBinding(int target) {
+        Integer id = bufferBindings.get(target);
+        return id == null ? 0 : id;
     }
 
     public static void bufferData(int target, ByteBuffer data, int usage) {
@@ -1349,6 +1388,18 @@ public final class GLEmu {
             case 3379: return intParams.getOrDefault(3379, 4096);
             case 34930: return 16; // GL_MAX_TEXTURE_IMAGE_UNITS
             case 34018: return 3; // GL_MAX_TEXTURE_UNITS
+            // Fixed-function and emulated state, which WebGL cannot answer (Sodium reads the fog this way).
+            case GLConst.FOG_MODE: return fogMode;
+            case GLConst.FOG: case GLConst.ALPHA_TEST: case GLConst.LIGHTING: case GLConst.TEXTURE_2D:
+            case GLConst.LIGHT0: case GLConst.LIGHT1: case GLConst.COLOR_LOGIC_OP:
+                return isEnabled(pname) ? 1 : 0; // glGetBoolean of a capability
+            case 34229: return boundVertexArray; // GL_VERTEX_ARRAY_BINDING
+            case 34965: return bufferBinding(WebGL2RenderingContext.ELEMENT_ARRAY_BUFFER);
+            case 36662: return bufferBinding(36662); // GL_COPY_READ_BUFFER_BINDING
+            case 36663: return bufferBinding(36663); // GL_COPY_WRITE_BUFFER_BINDING
+            case 35053: return bufferBinding(35051); // GL_PIXEL_PACK_BUFFER_BINDING
+            case 35055: return bufferBinding(35052); // GL_PIXEL_UNPACK_BUFFER_BINDING
+            case 35368: return bufferBinding(35345); // GL_UNIFORM_BUFFER_BINDING
             default:
                 try {
                     return gl.getParameteri(pname);

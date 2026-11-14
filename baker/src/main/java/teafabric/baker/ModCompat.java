@@ -43,6 +43,7 @@ final class ModCompat {
      * SodiumCompat.allowedValues after the constructor filled it.
      */
     private static void sodium(Map<String, byte[]> classes) {
+        sodiumChunkBuilder(classes);
         String control = "me/jellysquid/mods/sodium/client/gui/options/control/CyclingControl";
         if (!classes.containsKey(control)) {
             return;
@@ -182,6 +183,52 @@ final class ModCompat {
         if (defined > 0) {
             System.out.println("[baker] FerriteCore: " + defined + " Guava access classes defined at build time");
         }
+    }
+
+    /**
+     * Sodium meshes chunks on worker threads, one per core. In the browser those are green threads sharing
+     * the page's only thread, and a worker runs job after job without blocking, so the page drew no frames
+     * until the whole queue was built (minutes after joining a world). One worker is enough, and it yields
+     * after every job: Thread.yield hands the browser a turn when the current time slice is used up, like
+     * Minecraft's own worker (MinecraftCompat.YieldingWorker).
+     */
+    private static void sodiumChunkBuilder(Map<String, byte[]> classes) {
+        String builder = "me/jellysquid/mods/sodium/client/render/chunk/compile/ChunkBuilder";
+        String worker = builder + "$WorkerRunnable";
+        if (!classes.containsKey(builder) || !classes.containsKey(worker)) {
+            return;
+        }
+        patch(classes, builder, node -> {
+            MethodNode count = method(node, "getOptimalThreadCount", "()I");
+            if (count == null) {
+                return false;
+            }
+            InsnList code = new InsnList();
+            code.add(new InsnNode(Opcodes.ICONST_1));
+            code.add(new InsnNode(Opcodes.IRETURN));
+            replace(count, code);
+            return true;
+        });
+        patch(classes, worker, node -> {
+            MethodNode run = method(node, "run", "()V");
+            if (run == null) {
+                return false;
+            }
+            // The loop starts at the method's first instruction (aload_0; getfield running): every job, and
+            // every skipped cancelled job, jumps back there.
+            AbstractInsnNode first = run.instructions.getFirst();
+            while (first != null && first.getOpcode() < 0) {
+                first = first.getNext();
+            }
+            AbstractInsnNode next = first == null ? null : first.getNext();
+            if (first == null || first.getOpcode() != Opcodes.ALOAD || !(next instanceof FieldInsnNode)
+                    || !((FieldInsnNode) next).name.equals("running")) {
+                return false;
+            }
+            run.instructions.insertBefore(first,
+                    new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Thread", "yield", "()V", false));
+            return true;
+        });
     }
 
     private interface Patch {
