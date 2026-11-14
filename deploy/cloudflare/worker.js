@@ -41,6 +41,12 @@ export default {
       response = await serveSplit(request, env, url);
     } else {
       response = await env.ASSETS.fetch(request);
+      // Content-hashed files never change: c/ (compressed game files, see files.json), sounds/<hash>.ogg
+      // and lang/<hash>.json. Browsers keep them, so later visits download nothing but what is new.
+      if (response.status === 200 && /^\/(c|sounds|lang)\//.test(url.pathname)) {
+        response = new Response(response.body, response);
+        response.headers.set("Cache-Control", "private, max-age=31536000, immutable");
+      }
     }
     if (viaPassword && response.status !== 101) {
       response = new Response(response.body, response);

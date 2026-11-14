@@ -409,11 +409,13 @@
 
   // ------------------------------------------------------------------ start-up
 
-  async function fetchWithProgress(url, label, weight, base) {
-    const response = await fetch(url);
+  const nativeFetch = window.fetch.bind(window); // serveDownloadsToRuntime() overrides window.fetch
+  async function fetchWithProgress(url, label, weight, base, shownBefore, shownTotal) {
+    const response = await nativeFetch(url);
     if (!response.ok) throw new Error(url + ': HTTP ' + response.status);
     // A compressing host (Cloudflare) sends the compressed length, or none: then progress is approximate.
     const total = +response.headers.get('Content-Length') || 0;
+    const before = shownBefore || 0;
     if (!response.body) {
       const buf = await response.arrayBuffer();
       setStatus(label, base + weight);
@@ -427,8 +429,9 @@
       if (r.done) break;
       chunks.push(r.value);
       received += r.value.length;
-      const mib = Math.round(received / 1048576);
-      setStatus(label + ' ' + mib + (total ? ' / ' + Math.round(total / 1048576) : '') + ' MiB',
+      const mib = Math.round((before + received) / 1048576);
+      const of = shownTotal || total;
+      setStatus(label + ' ' + mib + (of ? ' / ' + Math.round(of / 1048576) : '') + ' MiB',
         base + weight * (total ? Math.min(1, received / total) : 0.5));
     }
     const out = new Uint8Array(received);
@@ -438,34 +441,64 @@
     return out.buffer;
   }
 
-  // Hosts with a per-file size limit (Cloudflare: 25 MiB) get classes.wasm in parts, listed in
-  // teavm/classes.wasm.parts.json (scripts/deploy-cloudflare.sh). The runtime fetches teavm/classes.wasm
-  // itself (stack traces use the same path), so that one request is answered with the reassembled module.
-  async function loadSplitWasm(base, weight) {
-    let manifest = null;
+  // Hosted builds (scripts/deploy-cloudflare.sh) list their large files in files.json: each is stored
+  // gzip-compressed (classes.wasm: 100 MB -> 21 MB) under a content-hashed name, in parts below the
+  // host's per-file limit (Cloudflare: 25 MiB). The browser decompresses natively (DecompressionStream).
+  // Without files.json (local builds, the downloadable version) the files are fetched as they are.
+  let manifest = null;
+  async function loadManifest() {
     try {
-      const r = await fetch('teavm/classes.wasm.parts.json', { cache: 'no-cache' });
+      const r = await fetch('files.json', { cache: 'no-cache' });
       if (r.ok) manifest = await r.json();
     } catch (e) {
-      // not split
+      // plain files
     }
-    if (!manifest || !manifest.parts) return false;
-    const parts = [];
-    const n = manifest.parts.length;
-    for (let i = 0; i < n; i++) {
-      parts.push(await fetchWithProgress('teavm/' + manifest.parts[i], 'Downloading game code (' + (i + 1) + '/' + n + ')',
-        weight / n, base + weight * i / n));
+  }
+
+  async function gunzip(blob) {
+    const head = new Uint8Array(await blob.slice(0, 2).arrayBuffer());
+    if (head[0] !== 0x1f || head[1] !== 0x8b) return blob.arrayBuffer(); // already decoded on the way
+    return new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  }
+
+  // Downloads a file (by its plain path) with progress; returns an ArrayBuffer.
+  const downloads = {};
+  function download(path, label, weight, base) {
+    if (!downloads[path]) downloads[path] = downloadNow(path, label, weight, base);
+    return downloads[path];
+  }
+  async function downloadNow(path, label, weight, base) {
+    const entry = manifest && manifest.files && manifest.files[path];
+    if (!entry) return fetchWithProgress(path, label, weight, base);
+    const total = entry.parts.reduce(function (n, p) { return n + p.size; }, 0) || 1;
+    const chunks = [];
+    let done = 0;
+    for (let i = 0; i < entry.parts.length; i++) {
+      const part = entry.parts[i];
+      chunks.push(await fetchWithProgress(part.file, label, weight * part.size / total, base + weight * done / total,
+        done, total));
+      done += part.size;
     }
-    const wasm = new Blob(parts, { type: 'application/wasm' });
-    const realFetch = window.fetch;
+    const blob = new Blob(chunks);
+    return entry.gzip ? gunzip(blob) : blob.arrayBuffer();
+  }
+
+  // The TeaVM runtime fetches teavm/classes.wasm and its debug info itself: serve them from download().
+  function serveDownloadsToRuntime() {
+    // Without files.json only the Wasm module is downloaded here (for the progress bar).
+    const paths = manifest && manifest.files ? Object.keys(manifest.files) : ['teavm/classes.wasm'];
     window.fetch = function (input, init) {
       const url = typeof input === 'string' ? input : (input && input.url) || '';
-      if (/(^|\/)teavm\/classes\.wasm$/.test(url)) {
-        return Promise.resolve(new Response(wasm, { headers: { 'Content-Type': 'application/wasm' } }));
+      for (const path of paths) {
+        if (url === path || url.endsWith('/' + path)) {
+          return download(path, 'Downloading ' + path, 0, 0).then(function (buf) {
+            return new Response(buf, { headers: { 'Content-Type': path.endsWith('.wasm') ? 'application/wasm'
+              : 'application/octet-stream' } });
+          });
+        }
       }
-      return realFetch.apply(this, arguments);
+      return nativeFetch(input, init);
     };
-    return true;
   }
 
   // Optionally compile without the native "js-string" builtins (TeaVM then uses JS fallbacks).
@@ -624,9 +657,11 @@
     try {
       const nameChosen = chooseName().then(function (name) { tf.config.username = name; });
       const storeReady = tf.store.init();
-      tf.archives['/classpath'] = await fetchWithProgress('data/classpath.zip', 'Downloading game resources', 0.2, 0);
-      tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.1, 0.2);
-      await loadSplitWasm(0.3, 0.2);
+      await loadManifest();
+      serveDownloadsToRuntime();
+      tf.archives['/classpath'] = await download('data/classpath.zip', 'Downloading game resources', 0.15, 0);
+      tf.archives['/minecraft/assets'] = await download('data/assets.zip', 'Downloading assets', 0.15, 0.15);
+      await download('teavm/classes.wasm', 'Downloading game code', 0.2, 0.3);
       await storeReady;
       if (!tf.config.username) {
         setStatus('Enter a player name to start.', 0.5);

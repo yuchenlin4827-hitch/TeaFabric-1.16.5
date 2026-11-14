@@ -19,16 +19,38 @@ WRANGLER=${WRANGLER:-npx --yes wrangler@4}
 
 rm -rf "$OUT/dist"
 mkdir -p "$OUT/dist"
-# The page, the runtime, the data archives; not the test pages (build/web/mini*).
+# The page and the runtime; not the test pages (build/web/mini*).
 cp build/web/index.html build/web/boot.js build/web/style.css "$OUT/dist/"
-cp -r build/web/data "$OUT/dist/"
 # Sounds and translations, fetched by the page when first needed (sounds/<hash>.ogg, lang/<hash>.json).
 [ -d build/web/sounds ] && cp -r build/web/sounds "$OUT/dist/"
 [ -d build/web/lang ] && cp -r build/web/lang "$OUT/dist/"
 mkdir -p "$OUT/dist/teavm"
 for f in build/web/teavm/*; do
-  [ "$(basename "$f")" = classes.wasm ] || cp "$f" "$OUT/dist/teavm/"
+  case "$(basename "$f")" in classes.wasm|classes.wasm.teadbg) ;; *) cp "$f" "$OUT/dist/teavm/" ;; esac
 done
+# The large files are stored gzip-compressed (classes.wasm: 100 MB -> 21 MB) under content-hashed names
+# in c/, in parts below the 25 MiB file limit, and listed in files.json; boot.js downloads and
+# decompresses them. The Worker lets browsers cache c/ for a year: a new build has new names.
+mkdir -p "$OUT/dist/c" "$OUT/gz"
+for f in teavm/classes.wasm teavm/classes.wasm.teadbg data/classpath.zip data/assets.zip; do
+  gz="$OUT/gz/$(basename "$f").gz"
+  gzip -9 -n -c "build/web/$f" > "$gz"
+  hash=$(sha256sum "$gz" | cut -c1-16)
+  split -b 24m -d -a 2 "$gz" "$OUT/dist/c/$hash-$(basename "$f").gz.part"
+  echo "$f $(stat -c %s "build/web/$f") $hash-$(basename "$f").gz"
+done > "$OUT/gz/list.txt"
+node -e '
+  const fs = require("fs"), path = require("path");
+  const [list, dir, out] = process.argv.slice(1);
+  const files = {};
+  for (const line of fs.readFileSync(list, "utf8").trim().split("\n")) {
+    const [file, size, stored] = line.split(" ");
+    const parts = fs.readdirSync(dir).filter((f) => f.startsWith(stored + ".part")).sort()
+      .map((f) => ({ file: "c/" + f, size: fs.statSync(path.join(dir, f)).size }));
+    files[file] = { gzip: true, size: +size, parts };
+  }
+  fs.writeFileSync(out, JSON.stringify({ files }, null, 1));
+' "$OUT/gz/list.txt" "$OUT/dist/c" "$OUT/dist/files.json"
 # /download/: the game as a download (scripts/package-desktop.sh: build/web plus a small launcher that
 # serves it on 127.0.0.1). The zip is over the 25 MiB file limit, so it is uploaded in parts that the
 # Worker joins into one download (with Range support). Behind the password like the rest of the site.
@@ -48,9 +70,6 @@ if [ "${LAUNCHER:-1}" != 0 ]; then
   node deploy/cloudflare/render-download.js deploy/cloudflare/download.html \
     "$OUT/dist/download/parts/manifest.json" "${SERVER_ADDRESS:-}" > "$OUT/dist/download/index.html"
 fi
-split -b 24m -d -a 2 build/web/teavm/classes.wasm "$OUT/dist/teavm/classes.wasm.part"
-parts=$(cd "$OUT/dist/teavm" && ls classes.wasm.part* | sed 's/.*/"&"/' | paste -sd, -)
-echo "{\"parts\": [$parts]}" > "$OUT/dist/teavm/classes.wasm.parts.json"
 for f in $(find "$OUT/dist" -type f -size +25M); do
   echo "$f is over Cloudflare's 25 MiB limit" >&2; exit 1
 done
