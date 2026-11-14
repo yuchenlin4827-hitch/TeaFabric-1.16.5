@@ -20,6 +20,24 @@ public final class LangCompat {
     private LangCompat() {
     }
 
+    // ---- BitSet
+
+    /**
+     * {@code BitSet.stream()}. TeaVM's version does not advance when a lazy consumer (flatMap, iterator)
+     * takes one element and pauses: every pull returns the same bit again, so the stream never ends.
+     * Lithium's point-of-interest search streams a BitSet into flatMap; a bee looking for a hive collected
+     * the same nests until the array overflowed, freezing the page for minutes. The bits are taken now
+     * (the JDK binds them at the terminal operation; nothing here changes a BitSet in between).
+     */
+    public static java.util.stream.IntStream stream(java.util.BitSet bits) {
+        int[] values = new int[bits.cardinality()];
+        int n = 0;
+        for (int i = bits.nextSetBit(0); i >= 0 && n < values.length; i = bits.nextSetBit(i + 1)) {
+            values[n++] = i;
+        }
+        return java.util.Arrays.stream(values, 0, n);
+    }
+
     // ---- System / Runtime
 
     /** There is no process to exit; stop the game loop and tell the page. */

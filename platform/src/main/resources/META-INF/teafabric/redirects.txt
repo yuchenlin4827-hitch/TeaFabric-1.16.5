@@ -1,5 +1,6 @@
 # Call-site redirects applied by the TeaVM plugin (compiler/.../RedirectTransformer).
 # owner                  method               descriptor                                   -> target
+java.util.BitSet         stream               ()Ljava/util/stream/IntStream;                -> teafabric.web.compat.LangCompat
 java.lang.Runtime        addShutdownHook      (Ljava/lang/Thread;)V                        -> teafabric.web.compat.RuntimeCompat
 java.lang.Runtime        removeShutdownHook   (Ljava/lang/Thread;)Z                        -> teafabric.web.compat.RuntimeCompat
 java.lang.Runtime        maxMemory            ()J                                          -> teafabric.web.compat.RuntimeCompat
