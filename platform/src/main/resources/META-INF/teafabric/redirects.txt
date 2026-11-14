@@ -126,3 +126,4 @@ net.minecraft.class_437  method_25423         (Lnet/minecraft/class_310;II)V    
 net.minecraft.class_5365 method_29595         ()Lnet/minecraft/class_5365;                  -> teafabric.web.compat.GraphicsCompat
 net.minecraft.class_5365 method_29592         (I)Lnet/minecraft/class_5365;                 -> teafabric.web.compat.GraphicsCompat
 net.minecraft.class_5407 method_30137         ()Z                                          -> teafabric.web.compat.GraphicsCompat
+net.minecraft.class_340  getNativeMemoryString ()Ljava/lang/String; -> teafabric.web.compat.SodiumCompat
