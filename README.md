@@ -8,15 +8,15 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 > 在建置期套用所有 Mixin，再用 TeaVM 編譯成單一 Wasm GC 模組，並以 WebGL 2 / WebAudio / DOM 取代 LWJGL。
 > 「JIT」指的是固定管線 OpenGL 的著色器即時特化：遊戲每使用一種新的 GL 狀態組合，就即時產生並編譯一支專用的
 > GLSL ES 3.00 程式並快取。目前狀態：在 Chromium 153 / Chrome 157 中可完整啟動到 **Minecraft 標題畫面**
-> （全景背景、Logo、閃爍標語與按鈕，滑鼠可操作），並可玩單人遊戲（世界存在瀏覽器裡）與多人連線；音效尚未完成。
+> （全景背景、Logo、閃爍標語與按鈕，滑鼠可操作），並可玩單人遊戲（世界存在瀏覽器裡）與多人連線，有音效與背景音樂，可切換語言（含繁體/簡體中文）。
 > 詳見下方「Status」。
 
 ## 線上體驗 / Try it
 
 | | |
 |---|---|
-| **網頁版**：在瀏覽器裡直接玩 | https://teafabric.teafabric-4107ab.workers.dev/ |
-| **下載版**：Windows / macOS / Linux，下載一次（約 55 MB，可續傳），之後在本機開啟 | https://teafabric.teafabric-4107ab.workers.dev/download/ |
+| **網頁版**：在瀏覽器裡直接玩（第一次約下載 40 MB，之後只下載更新的部分） | https://teafabric.teafabric-871743.workers.dev/ |
+| **下載版**：Windows / macOS / Linux，下載一次（約 133 MB，可續傳），之後在本機開啟 | https://teafabric.teafabric-871743.workers.dev/download/ |
 | **QQ 群** | 1063719613 |
 | **Discord** | https://discord.gg/GGN6TUSdNN |
 
@@ -82,6 +82,7 @@ Put additional Fabric mods (release jars for 1.16.5) into `./mods/`; they are ba
 | GLFW | canvas + DOM events queued in `boot.js`, delivered in `glfwPollEvents`; `glfwSwapBuffers` suspends the game fiber until the next animation frame; pointer lock, clipboard, fullscreen, file drop |
 | LWJGL memory (`MemoryUtil`, `MemoryStack`, pointers) | TeaVM's Wasm linear-memory heap; addresses are real offsets that WebGL/WebAudio read through typed-array views |
 | OpenAL | WebAudio (buffers, sources, streaming queues, listener, linear distance) |
+| stb_vorbis (Minecraft's `OggAudioStream`) | replaced by `net.minecraft.class_4228` in the platform layer: the browser decodes (`decodeAudioData`); `.ogg` files are fetched from `sounds/<hash>.ogg` when first played |
 | STB image/write/resize | pure-Java PNG decoder/encoder, box resize |
 | Log4j, OSHI, text2speech | small replacements (console logging, Web Speech narrator) |
 | JDK gaps in TeaVM | `java.util.concurrent` (executors, ForkJoin, `CompletableFuture`, locks, queues), `MessageDigest`, `FileChannel`, `UUID`, `java.net` addresses, … |
@@ -138,7 +139,16 @@ python3 -m http.server -d build/web 8080      # open http://localhost:8080/
 Useful properties: `-PteavmFast=true` (fast dependency analysis), `-PteavmOpt=SIMPLE|ADVANCED|FULL`,
 `-PteavmObfuscated=false` (function names in stack traces), `-PteavmStrict=false`,
 `-PteavmDeobfuscation=false`, `-PteavmHeap=8g` (compiler JVM heap), `-PteavmMaxHeap=1024` (Wasm heap, MiB),
-`-PteavmTarget=js` (TeaVM JavaScript backend instead of Wasm GC), `-PwebLanguages=all` or `=zh_tw,ja_jp`.
+`-PteavmTarget=js` (TeaVM JavaScript backend instead of Wasm GC), `-PwebLanguages=all` or `=zh_tw,ja_jp`
+(put those translations into `assets.zip` instead of fetching them on demand).
+
+**Sounds and languages** are not in `assets.zip` (253 MB of `.ogg`, 47 MB of translations): each such
+object there is a placeholder naming its hash, so Minecraft registers every sound and lists every
+language, and the page fetches the real file the first time it is needed, from `sounds/<hash>.ogg` or
+`lang/<hash>.json` next to the page (`packageWeb` puts them there; the music needs
+`gradle :tools:setupMinecraft -Passets=all`). Choosing a language reloads only the translations, not
+every resource as vanilla does, which takes seconds in a page. The title screen has no Realms button,
+since Realms needs Mojang's servers and a Microsoft account.
 
 ### Hosting on Cloudflare (password-protected)
 
@@ -154,8 +164,12 @@ WORKER_NAME=my-mc scripts/deploy-cloudflare.sh
 ```
 
 The browser asks for the password once (any user name); a signed cookie then keeps you in for 30 days.
-`classes.wasm` (about 105 MB) is over Cloudflare's 25 MiB per-file limit, so it is uploaded in 24 MiB
-parts that `boot.js` reassembles (`teavm/classes.wasm.parts.json`). The same Worker relays multiplayer
+Cloudflare does not compress these files, so the deploy stores the large ones gzip-compressed under
+content-hashed names in `c/` (in parts below the 25 MiB file limit), listed in `files.json`; `boot.js`
+downloads them with progress and decompresses them natively (`DecompressionStream`). A first visit
+downloads about 40 MB instead of about 147 MB, and the Worker lets browsers keep `c/`, `sounds/` and
+`lang/` for a year, so later visits download only what a new build changed (tested: a second visit
+fetched none of the large files again). The same Worker relays multiplayer
 connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
 (not tested yet; the free plan's CPU limits may cut busy connections).
 
@@ -163,7 +177,8 @@ connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` 
 who would rather not load 150 MB from the site every time, e.g. on slow connections. It holds `build/web`
 plus a small launcher (`launcher/`, Go) for Windows, macOS and Linux that serves it on
 `http://127.0.0.1:47265/` and opens the default browser; the port is fixed because the browser keeps
-worlds per address. `scripts/package-desktop.sh` builds it (`build/TeaFabric-1.16.5.zip`, about 55 MB);
+worlds per address. `scripts/package-desktop.sh` builds it (`build/TeaFabric-1.16.5.zip`, about 140 MB with
+the sound effects and every language; `SOUNDS=all` adds the music, `SOUNDS=none` leaves sounds out);
 the deploy script uploads it in 24 MiB parts that the Worker joins into one download with Range
 support, so downloads can be resumed. `SERVER_ADDRESS=wss://…` puts the server address on the page and
 in the zip's usage guide; `LAUNCHER=0` leaves the download out. A relay started with `--origin` must
@@ -351,6 +366,9 @@ Working:
   `requestAnimationFrame`.
 * Text input in screens (letters, IME / Chinese, clipboard), multiplayer over `ws://` / `wss://`
   (joining a 1.16.5 server, world rendering, walking, chat, the F3 screen).
+* Sound: effects and streamed music through WebAudio, decoded by the browser (tested in Chromium:
+  button clicks, menu music, footsteps and other sounds in a world).
+* Every language: switching to 繁體中文 takes under a second (one translation file is fetched).
 * TeaVM class-library bugs found by running the same programs on the JVM and in the browser and
   diffing the output, all patched in `compiler/src/runtime`: `ArrayDeque` iterator removal,
   `ListIterator.add`, `java.util.Random` (now bit-identical to the JDK), `Math.round/rint/ulp/cbrt/log10`,
@@ -370,8 +388,9 @@ Not working yet / known issues:
   function of `Blocks.<clinit>`; found with a gdb-attached renderer, a CDP trace and
   `--wasm-tier-up-filter`, fixed by the function splitters above. Strict mode stays enabled because
   null dereferences relying on engine traps crash Chromium (reproduced with a 10-line TeaVM program).
-* Sounds: Ogg Vorbis decoding is not wired up yet (`.ogg` assets are not packaged).
 * Singleplayer is slow: the integrated server shares the page's only thread with the client.
 * Multiplayer needs a WebSocket ↔ TCP proxy (browsers cannot open TCP sockets); online-mode
   authentication is not available.
-* Performance work (optimisation level, uniform caching, streaming buffers) has not started.
+* Performance: the module is compiled with TeaVM's `ADVANCED` optimisation (72 MB instead of 106 MB with
+  `SIMPLE`; measured in headless Chromium: title screen after 11.0 s instead of 12.9 s, a new world ready
+  after 43 s instead of 63 s). Rendering work (uniform caching, streaming buffers) has not started.

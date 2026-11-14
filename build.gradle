@@ -211,9 +211,69 @@ tasks.register('webClasspathZip', Zip) {
     destinationDirectory = new File(webOut, 'data')
 }
 
+// Sounds and translations are not in assets.zip (253 MB and 47 MB): each such object there is a
+// placeholder naming its hash, so Minecraft sees every sound and language, and the page fetches the
+// real file when it is first needed: sounds/<hash>.ogg (platform: teafabric.web.audio.WebSound and the
+// replacement net.minecraft.class_4228) and lang/<hash>.json (teafabric.web.compat.LanguageCompat).
+// -PwebLanguages=all or =zh_tw,ja_jp puts those translations into assets.zip instead.
+def assetPlaceholders = file('build/asset-placeholders')
+
+def wantedLanguage = { String name ->
+    def langs = (findProperty('webLanguages') ?: '').toString()
+    return !name.startsWith('minecraft/lang/') || langs == 'all'
+            || langs.split(',').any { name == "minecraft/lang/${it}.json" }
+}
+
+def onDemandObjects = { String suffix -> // hash -> file of the objects served next to the page
+    def indexFile = setupValue('minecraft.assetIndex')
+    def assetsDir = setupValue('minecraft.assetsDir')
+    def result = [:]
+    if (indexFile != null) {
+        new groovy.json.JsonSlurper().parse(new File(indexFile)).objects.each { name, obj ->
+            boolean wanted = suffix == '.ogg' ? name.endsWith('.ogg')
+                    : name.startsWith('minecraft/lang/') && !wantedLanguage(name)
+            if (wanted) {
+                def f = new File(assetsDir, "objects/${obj.hash.substring(0, 2)}/${obj.hash}")
+                if (f.exists()) {
+                    result[obj.hash] = f
+                }
+            }
+        }
+    }
+    return result
+}
+
+tasks.register('webAssetPlaceholders') {
+    group = 'teafabric'
+    description = 'Placeholder objects for assets.zip (sounds and translations are fetched on demand).'
+    def indexFile = setupValue('minecraft.assetIndex')
+    if (indexFile != null) {
+        inputs.file(indexFile)
+    }
+    inputs.property('webLanguages', (findProperty('webLanguages') ?: '').toString())
+    outputs.dir(assetPlaceholders)
+    doLast {
+        project.delete(assetPlaceholders)
+        if (indexFile == null) {
+            return
+        }
+        new groovy.json.JsonSlurper().parse(new File(indexFile)).objects.each { name, obj ->
+            String marker = name.endsWith('.ogg') ? 'TEAFABRIC-SOUND'
+                    : (name.startsWith('minecraft/lang/') && !wantedLanguage(name)) ? 'TEAFABRIC-ASSET' : null
+            if (marker != null) {
+                def f = new File(assetPlaceholders, "objects/${obj.hash.substring(0, 2)}/${obj.hash}")
+                f.parentFile.mkdirs()
+                f.text = "${marker}\n${obj.hash}\n"
+            }
+        }
+    }
+}
+
 tasks.register('webAssetsZip', Zip) {
     group = 'teafabric'
-    description = 'Asset index and non-sound objects (sounds are loaded on demand).'
+    description = 'Asset index, objects, and placeholders for the objects fetched on demand.'
+    dependsOn 'webAssetPlaceholders'
+    from(assetPlaceholders)
     entryCompression = ZipEntryCompression.STORED
     archiveFileName = 'assets.zip'
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -224,11 +284,7 @@ tasks.register('webAssetsZip', Zip) {
         def index = new groovy.json.JsonSlurper().parse(new File(indexFile))
         from(new File(indexFile)) { into 'indexes' }
         index.objects.each { name, obj ->
-            // -PwebLanguages=all ships every translation; by default only English (in the client jar)
-            def langs = (findProperty('webLanguages') ?: '').toString()
-            boolean wantLang = !name.startsWith('minecraft/lang/') || langs == 'all'
-                    || langs.split(',').any { name == "minecraft/lang/${it}.json" }
-            if (!name.endsWith('.ogg') && wantLang && !name.startsWith('minecraft/resourcepacks/')) {
+            if (!name.endsWith('.ogg') && wantedLanguage(name) && !name.startsWith('minecraft/resourcepacks/')) {
                 def h = obj.hash
                 def f = new File(assetsDir, "objects/${h.substring(0, 2)}/${h}")
                 if (f.exists()) {
@@ -258,6 +314,15 @@ tasks.register('packageWeb', Copy) {
     from({ zipTree(project(':compiler').configurations.runtimeClasspath.files.find { it.name.startsWith('teavm-core') }) }) {
         include 'org/teavm/backend/wasm/wasm-gc-runtime.js'
         eachFile { it.path = 'teavm/classes.wasm-runtime.js' }
+        includeEmptyDirs = false
+    }
+    // The objects fetched on demand by the page: sounds/<hash>.ogg and lang/<hash>.json
+    from({ onDemandObjects('.ogg').values() }) {
+        eachFile { it.path = "sounds/${it.name}.ogg" }
+        includeEmptyDirs = false
+    }
+    from({ onDemandObjects('.json').values() }) {
+        eachFile { it.path = "lang/${it.name}.json" }
         includeEmptyDirs = false
     }
     into webOut

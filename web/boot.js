@@ -303,6 +303,90 @@
     }
   };
 
+  // ------------------------------------------------------------------ sounds
+
+  // Ogg Vorbis decoding for teafabric.web.audio.WebSound. Vanilla sounds are fetched from
+  // sounds/<hash>.ogg when first played; resource-pack sounds arrive as bytes. The decoded AudioBuffer
+  // stays here until Java releases it; Java reads it as 16-bit PCM through copy().
+  const decoded = new Map();
+  let decodeContext = null;
+  function decoderContext() {
+    if (tf.audio) return tf.audio; // decode at the playback rate when the sound engine is up
+    if (!decodeContext) {
+      const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      decodeContext = new Offline(2, 1, 48000);
+    }
+    return decodeContext;
+  }
+  tf.sound = {
+    stats: { loaded: 0, failed: 0 },
+    load: function (id, hash, data) {
+      let ctx;
+      try {
+        ctx = decoderContext();
+      } catch (e) {
+        return false; // no WebAudio (?noaudio)
+      }
+      const bytes = hash
+        ? fetch('sounds/' + hash + '.ogg').then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.arrayBuffer();
+          })
+        : Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+      bytes.then(function (buf) {
+        return new Promise(function (resolve, reject) { ctx.decodeAudioData(buf, resolve, reject); });
+      }).then(function (audio) {
+        decoded.set(id, audio);
+        tf.sound.stats.loaded++;
+        wasmExports.teafabricSoundLoaded(id, 1);
+      }, function (e) {
+        console.warn('[sound] ' + (hash ? 'sounds/' + hash + '.ogg' : 'Ogg data') + ': ' + (e && e.message ? e.message : e));
+        tf.sound.stats.failed++;
+        wasmExports.teafabricSoundLoaded(id, 0);
+      });
+      return true;
+    },
+    get: function (id) {
+      return decoded.get(id);
+    },
+    copy: function (id, start, count, mem, ptr) {
+      const audio = decoded.get(id);
+      const channels = audio.numberOfChannels;
+      const out = new Int16Array(mem, ptr, count * channels);
+      for (let c = 0; c < channels; c++) {
+        const src = audio.getChannelData(c);
+        for (let i = 0, j = c; i < count; i++, j += channels) {
+          const v = src[start + i];
+          out[j] = v >= 1 ? 32767 : v <= -1 ? -32768 : (v * 32767) | 0;
+        }
+      }
+    },
+    release: function (id) {
+      decoded.delete(id);
+    }
+  };
+
+  // Other assets fetched on demand (teafabric.web.vfs.WebAssets), e.g. lang/<hash>.json.
+  const fetchedAssets = new Map();
+  tf.fetchAsset = function (id, url) {
+    fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.arrayBuffer();
+    }).then(function (buf) {
+      fetchedAssets.set(id, new Int8Array(buf));
+      wasmExports.teafabricAssetFetched(id, 1);
+    }, function (e) {
+      console.warn('[assets] ' + url + ': ' + (e && e.message ? e.message : e));
+      wasmExports.teafabricAssetFetched(id, 0);
+    });
+    return true;
+  };
+  tf.takeAsset = function (id) {
+    const data = fetchedAssets.get(id);
+    fetchedAssets.delete(id);
+    return data || null;
+  };
+
   // ------------------------------------------------------------------ files, fullscreen, exit
 
   canvas.addEventListener('dragover', function (e) { e.preventDefault(); });
@@ -325,11 +409,13 @@
 
   // ------------------------------------------------------------------ start-up
 
-  async function fetchWithProgress(url, label, weight, base) {
-    const response = await fetch(url);
+  const nativeFetch = window.fetch.bind(window); // serveDownloadsToRuntime() overrides window.fetch
+  async function fetchWithProgress(url, label, weight, base, shownBefore, shownTotal) {
+    const response = await nativeFetch(url);
     if (!response.ok) throw new Error(url + ': HTTP ' + response.status);
     // A compressing host (Cloudflare) sends the compressed length, or none: then progress is approximate.
     const total = +response.headers.get('Content-Length') || 0;
+    const before = shownBefore || 0;
     if (!response.body) {
       const buf = await response.arrayBuffer();
       setStatus(label, base + weight);
@@ -343,8 +429,9 @@
       if (r.done) break;
       chunks.push(r.value);
       received += r.value.length;
-      const mib = Math.round(received / 1048576);
-      setStatus(label + ' ' + mib + (total ? ' / ' + Math.round(total / 1048576) : '') + ' MiB',
+      const mib = Math.round((before + received) / 1048576);
+      const of = shownTotal || total;
+      setStatus(label + ' ' + mib + (of ? ' / ' + Math.round(of / 1048576) : '') + ' MiB',
         base + weight * (total ? Math.min(1, received / total) : 0.5));
     }
     const out = new Uint8Array(received);
@@ -354,34 +441,64 @@
     return out.buffer;
   }
 
-  // Hosts with a per-file size limit (Cloudflare: 25 MiB) get classes.wasm in parts, listed in
-  // teavm/classes.wasm.parts.json (scripts/deploy-cloudflare.sh). The runtime fetches teavm/classes.wasm
-  // itself (stack traces use the same path), so that one request is answered with the reassembled module.
-  async function loadSplitWasm(base, weight) {
-    let manifest = null;
+  // Hosted builds (scripts/deploy-cloudflare.sh) list their large files in files.json: each is stored
+  // gzip-compressed (classes.wasm: 100 MB -> 21 MB) under a content-hashed name, in parts below the
+  // host's per-file limit (Cloudflare: 25 MiB). The browser decompresses natively (DecompressionStream).
+  // Without files.json (local builds, the downloadable version) the files are fetched as they are.
+  let manifest = null;
+  async function loadManifest() {
     try {
-      const r = await fetch('teavm/classes.wasm.parts.json', { cache: 'no-cache' });
+      const r = await fetch('files.json', { cache: 'no-cache' });
       if (r.ok) manifest = await r.json();
     } catch (e) {
-      // not split
+      // plain files
     }
-    if (!manifest || !manifest.parts) return false;
-    const parts = [];
-    const n = manifest.parts.length;
-    for (let i = 0; i < n; i++) {
-      parts.push(await fetchWithProgress('teavm/' + manifest.parts[i], 'Downloading game code (' + (i + 1) + '/' + n + ')',
-        weight / n, base + weight * i / n));
+  }
+
+  async function gunzip(blob) {
+    const head = new Uint8Array(await blob.slice(0, 2).arrayBuffer());
+    if (head[0] !== 0x1f || head[1] !== 0x8b) return blob.arrayBuffer(); // already decoded on the way
+    return new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  }
+
+  // Downloads a file (by its plain path) with progress; returns an ArrayBuffer.
+  const downloads = {};
+  function download(path, label, weight, base) {
+    if (!downloads[path]) downloads[path] = downloadNow(path, label, weight, base);
+    return downloads[path];
+  }
+  async function downloadNow(path, label, weight, base) {
+    const entry = manifest && manifest.files && manifest.files[path];
+    if (!entry) return fetchWithProgress(path, label, weight, base);
+    const total = entry.parts.reduce(function (n, p) { return n + p.size; }, 0) || 1;
+    const chunks = [];
+    let done = 0;
+    for (let i = 0; i < entry.parts.length; i++) {
+      const part = entry.parts[i];
+      chunks.push(await fetchWithProgress(part.file, label, weight * part.size / total, base + weight * done / total,
+        done, total));
+      done += part.size;
     }
-    const wasm = new Blob(parts, { type: 'application/wasm' });
-    const realFetch = window.fetch;
+    const blob = new Blob(chunks);
+    return entry.gzip ? gunzip(blob) : blob.arrayBuffer();
+  }
+
+  // The TeaVM runtime fetches teavm/classes.wasm and its debug info itself: serve them from download().
+  function serveDownloadsToRuntime() {
+    // Without files.json only the Wasm module is downloaded here (for the progress bar).
+    const paths = manifest && manifest.files ? Object.keys(manifest.files) : ['teavm/classes.wasm'];
     window.fetch = function (input, init) {
       const url = typeof input === 'string' ? input : (input && input.url) || '';
-      if (/(^|\/)teavm\/classes\.wasm$/.test(url)) {
-        return Promise.resolve(new Response(wasm, { headers: { 'Content-Type': 'application/wasm' } }));
+      for (const path of paths) {
+        if (url === path || url.endsWith('/' + path)) {
+          return download(path, 'Downloading ' + path, 0, 0).then(function (buf) {
+            return new Response(buf, { headers: { 'Content-Type': path.endsWith('.wasm') ? 'application/wasm'
+              : 'application/octet-stream' } });
+          });
+        }
       }
-      return realFetch.apply(this, arguments);
+      return nativeFetch(input, init);
     };
-    return true;
   }
 
   // Optionally compile without the native "js-string" builtins (TeaVM then uses JS fallbacks).
@@ -540,9 +657,11 @@
     try {
       const nameChosen = chooseName().then(function (name) { tf.config.username = name; });
       const storeReady = tf.store.init();
-      tf.archives['/classpath'] = await fetchWithProgress('data/classpath.zip', 'Downloading game resources', 0.2, 0);
-      tf.archives['/minecraft/assets'] = await fetchWithProgress('data/assets.zip', 'Downloading assets', 0.1, 0.2);
-      await loadSplitWasm(0.3, 0.2);
+      await loadManifest();
+      serveDownloadsToRuntime();
+      tf.archives['/classpath'] = await download('data/classpath.zip', 'Downloading game resources', 0.15, 0);
+      tf.archives['/minecraft/assets'] = await download('data/assets.zip', 'Downloading assets', 0.15, 0.15);
+      await download('teavm/classes.wasm', 'Downloading game code', 0.2, 0.3);
       await storeReady;
       if (!tf.config.username) {
         setStatus('Enter a player name to start.', 0.5);
