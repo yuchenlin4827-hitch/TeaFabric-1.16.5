@@ -188,9 +188,9 @@ final class ModCompat {
     /**
      * Sodium meshes chunks on worker threads, one per core. In the browser those are green threads sharing
      * the page's only thread, and a worker runs job after job without blocking, so the page drew no frames
-     * until the whole queue was built (minutes after joining a world). One worker is enough, and it yields
-     * after every job: Thread.yield hands the browser a turn when the current time slice is used up, like
-     * Minecraft's own worker (MinecraftCompat.YieldingWorker).
+     * until the whole queue was built (minutes after joining a world). One worker is enough, and after every
+     * job it calls SodiumCompat.chunkWorkerYield, which gives the page a turn once the worker has run for a
+     * few milliseconds.
      */
     private static void sodiumChunkBuilder(Map<String, byte[]> classes) {
         String builder = "me/jellysquid/mods/sodium/client/render/chunk/compile/ChunkBuilder";
@@ -225,8 +225,8 @@ final class ModCompat {
                     || !((FieldInsnNode) next).name.equals("running")) {
                 return false;
             }
-            run.instructions.insertBefore(first,
-                    new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Thread", "yield", "()V", false));
+            run.instructions.insertBefore(first, new MethodInsnNode(Opcodes.INVOKESTATIC,
+                    "teafabric/web/compat/SodiumCompat", "chunkWorkerYield", "()V", false));
             return true;
         });
     }
