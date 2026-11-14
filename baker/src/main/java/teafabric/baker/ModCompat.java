@@ -96,6 +96,25 @@ final class ModCompat {
                 return true;
             });
         }
+        // FerriteConfig's static initialiser hands its options to ConfigFileHandler.finish through reflection
+        // (Class.forName + getMethod + invoke): call it directly.
+        String builder = "malte0811/ferritecore/mixin/config/FerriteConfig$ConfigBuilder";
+        String fileHandler = "malte0811/ferritecore/mixin/config/ConfigFileHandler";
+        if (classes.containsKey(builder) && classes.containsKey(fileHandler)) {
+            patch(classes, builder, node -> {
+                MethodNode finish = method(node, "finish", "()V");
+                if (finish == null) {
+                    return false;
+                }
+                InsnList code = new InsnList();
+                code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                code.add(new FieldInsnNode(Opcodes.GETFIELD, builder, "options", "Ljava/util/List;"));
+                code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, fileHandler, "finish", "(Ljava/util/List;)V", false));
+                code.add(new InsnNode(Opcodes.RETURN));
+                replace(finish, code);
+                return true;
+            });
+        }
         if (defined > 0) {
             System.out.println("[baker] FerriteCore: " + defined + " Guava access classes defined at build time");
         }
