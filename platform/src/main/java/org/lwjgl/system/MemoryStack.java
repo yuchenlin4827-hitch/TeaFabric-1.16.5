@@ -76,6 +76,11 @@ public final class MemoryStack implements AutoCloseable {
         return base + pointer;
     }
 
+    /** Restores a position returned by getPointer (Sodium's shader-source workaround does this). */
+    public void setPointer(int pointer) {
+        this.pointer = pointer;
+    }
+
     public int getPointer() {
         return pointer;
     }

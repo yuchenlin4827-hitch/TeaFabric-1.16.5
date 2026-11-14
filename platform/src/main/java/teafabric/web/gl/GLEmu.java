@@ -56,6 +56,7 @@ public final class GLEmu {
         String log = "";
         boolean linked;
         String firstAttribute;
+        boolean explicitAttributes; // glBindAttribLocation was used: no gl_Vertex aliasing
     }
 
     private static int alloc(List<JSObject> table, JSObject obj) {
@@ -97,11 +98,39 @@ public final class GLEmu {
     private static final ArrayPtr colorArray = new ArrayPtr();
     private static final ArrayPtr normalArray = new ArrayPtr();
     private static final ArrayPtr[] texCoordArray = {new ArrayPtr(), new ArrayPtr(), new ArrayPtr()};
-    private static final ArrayPtr[] genericArray = new ArrayPtr[16];
+    // Generic attribute arrays. A vertex array object (emulated: the WebGL default VAO is used, and the
+    // pointers are applied at draw time) is simply its own set of these.
+    private static final ArrayPtr[] defaultGenericArray = newGenericArrays();
+    private static ArrayPtr[] genericArray = defaultGenericArray;
+    private static final List<ArrayPtr[]> vertexArrays = new ArrayList<>();
 
-    static {
-        for (int i = 0; i < genericArray.length; i++) {
-            genericArray[i] = new ArrayPtr();
+    private static ArrayPtr[] newGenericArrays() {
+        ArrayPtr[] a = new ArrayPtr[16];
+        for (int i = 0; i < a.length; i++) {
+            a[i] = new ArrayPtr();
+        }
+        return a;
+    }
+
+    public static int genVertexArrays() {
+        if (vertexArrays.isEmpty()) {
+            vertexArrays.add(null); // id 0: the default arrays
+        }
+        vertexArrays.add(newGenericArrays());
+        return vertexArrays.size() - 1;
+    }
+
+    public static void bindVertexArray(int id) {
+        ArrayPtr[] a = id > 0 && id < vertexArrays.size() ? vertexArrays.get(id) : null;
+        genericArray = a != null ? a : defaultGenericArray;
+    }
+
+    public static void deleteVertexArrays(int id) {
+        if (id > 0 && id < vertexArrays.size() && vertexArrays.get(id) != null) {
+            if (genericArray == vertexArrays.get(id)) {
+                genericArray = defaultGenericArray;
+            }
+            vertexArrays.set(id, null);
         }
     }
 
@@ -1464,7 +1493,7 @@ public final class GLEmu {
 
     public static void linkProgram(int program) {
         UserProgram p = programs.get(program);
-        if (p.firstAttribute != null) {
+        if (p.firstAttribute != null && !p.explicitAttributes) {
             gl.bindAttribLocation(p.program, 0, p.firstAttribute);
         }
         gl.linkProgram(p.program);
@@ -1597,6 +1626,77 @@ public final class GLEmu {
     }
 
     // ------------------------------------------------------------------ helpers for LWJGL front-ends
+
+    public static void bindAttribLocation(int program, int index, CharSequence name) {
+        UserProgram p = programs.get(program);
+        p.explicitAttributes = true;
+        gl.bindAttribLocation(p.program, index, name.toString());
+    }
+
+    public static void uniform1f(int location, float x) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform1f(l, x);
+        }
+    }
+
+    public static void uniform2f(int location, float x, float y) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform2f(l, x, y);
+        }
+    }
+
+    public static void uniform3f(int location, float x, float y, float z) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform3f(l, x, y, z);
+        }
+    }
+
+    public static void uniform4f(int location, float x, float y, float z, float w) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform4f(l, x, y, z, w);
+        }
+    }
+
+    /** glVertexAttrib4f for a generic attribute: the value used while its array is disabled. */
+    public static void genericAttrib4f(int index, float x, float y, float z, float w) {
+        vertexAttrib4f(index, x, y, z, w);
+    }
+
+    public static void multiDrawArrays(int mode, IntBuffer first, IntBuffer count) {
+        int n = Math.min(first.remaining(), count.remaining());
+        for (int i = 0; i < n; i++) {
+            drawArrays(mode, first.get(first.position() + i), count.get(count.position() + i));
+        }
+    }
+
+    public static void copyBufferSubData(int readTarget, int writeTarget, long readOffset, long writeOffset, long size) {
+        gl.copyBufferSubData(readTarget, writeTarget, (int) readOffset, (int) writeOffset, (int) size);
+    }
+
+    public static void vertexAttribDivisor(int index, int divisor) {
+        gl.vertexAttribDivisor(index, divisor);
+    }
+
+    /** nglShaderSource: count strings at the 8-byte pointers in strings, lengths (ints) or NUL-terminated. */
+    public static void shaderSource(int shader, int count, long strings, long lengths) {
+        StringBuilder source = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            long p = NativeMemory.getLong(strings + i * 8L);
+            int len = lengths != 0 ? NativeMemory.getInt(lengths + i * 4L) : -1;
+            if (len < 0) {
+                source.append(NativeMemory.utf8(p));
+            } else {
+                byte[] b = new byte[len];
+                NativeMemory.copyToArray(p, b, 0, len);
+                source.append(new String(b, java.nio.charset.StandardCharsets.UTF_8));
+            }
+        }
+        shaderSource(shader, source);
+    }
 
     public static float[] readFloats(FloatBuffer b, int max) {
         int n = Math.min(max, b.remaining());
