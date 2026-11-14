@@ -394,6 +394,9 @@ Working:
 * Sound: effects and streamed music through WebAudio, decoded by the browser (tested in Chromium:
   button clicks, menu music, footsteps and other sounds in a world).
 * Every language: switching to 繁體中文 takes under a second (one translation file is fetched).
+* Graphics: Fast and Fancy. Fabulous! is not offered (its translucency post-processing chain is not
+  supported by the WebGL emulation and rendered worlds black); Fabulous in an old options.txt loads as
+  Fancy, and the GPU warnlist screen is off (the emulation reports OpenGL 2.1, so it always warned).
 * TeaVM class-library bugs found by running the same programs on the JVM and in the browser and
   diffing the output, all patched in `compiler/src/runtime`: `ArrayDeque` iterator removal,
   `ListIterator.add`, `java.util.Random` (now bit-identical to the JDK), `Math.round/rint/ulp/cbrt/log10`,
