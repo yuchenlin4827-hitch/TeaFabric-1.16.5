@@ -57,6 +57,11 @@ public final class GLEmu {
         boolean linked;
         String firstAttribute;
         boolean explicitAttributes; // glBindAttribLocation was used: no gl_Vertex aliasing
+        // The alpha test GlslTranslator adds to fragment shaders, and the values last set.
+        WebGLUniformLocation alphaFuncLoc;
+        WebGLUniformLocation alphaRefLoc;
+        int cAlphaFunc;
+        float cAlphaRef = Float.NaN;
     }
 
     private static int alloc(List<JSObject> table, JSObject obj) {
@@ -685,6 +690,7 @@ public final class GLEmu {
         if (user) {
             UserProgram up = programs.get(currentProgram);
             useGlProgram(up.program);
+            applyAlphaTest(up);
             bindArrays(first, count, true);
         } else {
             ShaderJit.Program p = jit.get(buildVariant());
@@ -694,6 +700,22 @@ public final class GLEmu {
         }
         issue(mode, count);
         bindArrayBuffer(arrayBufferBinding);
+    }
+
+    /** The fixed-function alpha test, which desktop GL applies after a program's fragment shader too. */
+    private static void applyAlphaTest(UserProgram up) {
+        if (up.alphaFuncLoc == null) {
+            return;
+        }
+        int func = alphaTest && alphaFunc != GLConst.ALWAYS ? alphaFunc : 0;
+        if (up.cAlphaFunc != func) {
+            gl.uniform1i(up.alphaFuncLoc, func);
+            up.cAlphaFunc = func;
+        }
+        if (func != 0 && up.cAlphaRef != alphaRef && up.alphaRefLoc != null) {
+            gl.uniform1f(up.alphaRefLoc, alphaRef);
+            up.cAlphaRef = alphaRef;
+        }
     }
 
     private static void useGlProgram(WebGLProgram program) {
@@ -1549,6 +1571,12 @@ public final class GLEmu {
         }
         gl.linkProgram(p.program);
         p.linked = gl.getProgramParameterb(p.program, WebGL2RenderingContext.LINK_STATUS);
+        if (p.linked) {
+            p.alphaFuncLoc = gl.getUniformLocation(p.program, GlslTranslator.ALPHA_FUNC);
+            p.alphaRefLoc = gl.getUniformLocation(p.program, GlslTranslator.ALPHA_REF);
+            p.cAlphaFunc = 0;
+            p.cAlphaRef = Float.NaN;
+        }
         String log = gl.getProgramInfoLog(p.program);
         p.log = log == null ? "" : log;
         if (!p.linked) {
