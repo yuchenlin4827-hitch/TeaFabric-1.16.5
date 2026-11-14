@@ -63,11 +63,19 @@ tasks.register('prepareBakeMods', Sync) {
     into(new File(bakeRun, 'mods'))
 }
 
+tasks.register('prepareBakeConfig', Copy) {
+    group = 'teafabric'
+    description = 'Copies bake-config/ (Fabric Loader dependency overrides, mod configs) into the bake run.'
+    from('bake-config') { exclude 'README.md' }
+    into(new File(bakeRun, 'config'))
+}
+
 tasks.register('bake', JavaExec) {
     group = 'teafabric'
     description = 'Runs Fabric Loader at build time and writes mixin-applied bytecode to .cache/baked/baked.jar.'
-    dependsOn 'prepareBakeMods'
+    dependsOn 'prepareBakeMods', 'prepareBakeConfig'
     inputs.dir(new File(bakeRun, 'mods'))
+    inputs.dir(file('bake-config'))
     inputs.file(setupFile)
     outputs.file(bakedJar)
     workingDir = bakeRun

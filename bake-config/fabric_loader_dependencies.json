@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "overrides": {
+    "sodium-extra": {
+      "-breaks": {
+        "sodium": ""
+      }
+    },
+    "advancementinfo": {
+      "-recommends": {
+        "modupdater": ""
+      }
+    },
+    "antighost": {
+      "-recommends": {
+        "modupdater": ""
+      }
+    },
+    "colormatic": {
+      "-recommends": {
+        "quilt-loader": ""
+      }
+    }
+  }
+}
