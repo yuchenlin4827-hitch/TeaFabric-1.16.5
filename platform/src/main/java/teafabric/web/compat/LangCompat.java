@@ -20,6 +20,17 @@ public final class LangCompat {
     private LangCompat() {
     }
 
+    // ---- LWJGL
+
+    /**
+     * PointerBuffer.flip() as compiled against LWJGL, where PointerBuffer extends CustomBuffer and flip() returns
+     * CustomBuffer (Iris' file dialog); the platform's PointerBuffer is a standalone class.
+     */
+    public static org.lwjgl.system.CustomBuffer<?> flip(org.lwjgl.PointerBuffer buffer) {
+        buffer.flip();
+        return null;
+    }
+
     // ---- BitSet
 
     /**

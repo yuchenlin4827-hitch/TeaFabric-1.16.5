@@ -433,6 +433,159 @@ public final class GLEmu {
         currentColor[3] = a;
     }
 
+    // ------------------------------------------------------------------ immediate mode and display lists
+    // OpenGL 1.1 glBegin/glVertex/glEnd and display lists (Light Overlay draws its markers this way). The vertices
+    // of a glBegin/glEnd pair are drawn through the client-array path; a display list records those draws.
+
+    private static int immMode = -1;
+    private static float[] imm = new float[9 * 256]; // x y z, r g b a, s t
+    private static int immCount;
+    private static final List<List<Runnable>> displayLists = new ArrayList<>();
+    private static List<Runnable> compiling;
+    private static boolean compileAndExecute;
+    private static float[] colorBeforeList;
+
+    public static void begin(int mode) {
+        immMode = mode;
+        immCount = 0;
+    }
+
+    public static void vertex(float x, float y, float z) {
+        if (immMode < 0) {
+            return;
+        }
+        int o = immCount * 9;
+        if (o + 9 > imm.length) {
+            imm = java.util.Arrays.copyOf(imm, imm.length * 2);
+        }
+        imm[o] = x;
+        imm[o + 1] = y;
+        imm[o + 2] = z;
+        System.arraycopy(currentColor, 0, imm, o + 3, 4);
+        imm[o + 7] = currentTexCoord[0][0];
+        imm[o + 8] = currentTexCoord[0][1];
+        immCount++;
+    }
+
+    public static void end() {
+        int mode = immMode;
+        immMode = -1;
+        if (mode < 0 || immCount == 0) {
+            return;
+        }
+        float[] data = java.util.Arrays.copyOf(imm, immCount * 9);
+        int count = immCount;
+        if (compiling != null) {
+            compiling.add(() -> drawImmediate(mode, data, count));
+            if (!compileAndExecute) {
+                return;
+            }
+        }
+        drawImmediate(mode, data, count);
+    }
+
+    private static void drawImmediate(int mode, float[] data, int count) {
+        byte[] bytes = new byte[data.length * 4];
+        for (int i = 0; i < data.length; i++) {
+            int v = Float.floatToRawIntBits(data[i]);
+            bytes[i * 4] = (byte) v;
+            bytes[i * 4 + 1] = (byte) (v >> 8);
+            bytes[i * 4 + 2] = (byte) (v >> 16);
+            bytes[i * 4 + 3] = (byte) (v >> 24);
+        }
+        long p = teafabric.web.mem.NativeMemory.malloc(bytes.length);
+        teafabric.web.mem.NativeMemory.copyFromArray(bytes, 0, p, bytes.length);
+        ArrayPtr[] saved = {copyOf(vertexArray), copyOf(colorArray), copyOf(texCoordArray[0])};
+        boolean normal = normalArray.enabled;
+        boolean tex1 = texCoordArray[1].enabled;
+        boolean tex2 = texCoordArray[2].enabled;
+        int binding = arrayBufferBinding;
+        int program = currentProgram;
+        try {
+            arrayBufferBinding = 0;
+            currentProgram = 0;
+            pointer(vertexArray, 3, GLConst.FLOAT, 36, p);
+            vertexArray.enabled = true;
+            pointer(colorArray, 4, GLConst.FLOAT, 36, p + 12);
+            colorArray.normalized = false;
+            colorArray.enabled = true;
+            pointer(texCoordArray[0], 2, GLConst.FLOAT, 36, p + 28);
+            texCoordArray[0].enabled = true;
+            normalArray.enabled = false;
+            texCoordArray[1].enabled = false;
+            texCoordArray[2].enabled = false;
+            drawArrays(mode, 0, count);
+        } finally {
+            restore(vertexArray, saved[0]);
+            restore(colorArray, saved[1]);
+            restore(texCoordArray[0], saved[2]);
+            normalArray.enabled = normal;
+            texCoordArray[1].enabled = tex1;
+            texCoordArray[2].enabled = tex2;
+            arrayBufferBinding = binding;
+            currentProgram = program;
+            teafabric.web.mem.NativeMemory.free(p);
+        }
+    }
+
+    private static ArrayPtr copyOf(ArrayPtr a) {
+        ArrayPtr c = new ArrayPtr();
+        restore(c, a);
+        return c;
+    }
+
+    private static void restore(ArrayPtr to, ArrayPtr from) {
+        to.enabled = from.enabled;
+        to.size = from.size;
+        to.type = from.type;
+        to.stride = from.stride;
+        to.pointer = from.pointer;
+        to.buffer = from.buffer;
+        to.normalized = from.normalized;
+    }
+
+    public static int genLists(int range) {
+        int first = displayLists.size() + 1;
+        for (int i = 0; i < range; i++) {
+            displayLists.add(new ArrayList<>());
+        }
+        return first;
+    }
+
+    public static void newList(int list, int mode) {
+        if (list <= 0 || list > displayLists.size()) {
+            return;
+        }
+        compiling = new ArrayList<>();
+        displayLists.set(list - 1, compiling);
+        compileAndExecute = mode == 4865; // GL_COMPILE_AND_EXECUTE
+        colorBeforeList = currentColor.clone();
+    }
+
+    public static void endList() {
+        compiling = null;
+        if (!compileAndExecute && colorBeforeList != null) {
+            System.arraycopy(colorBeforeList, 0, currentColor, 0, 4);
+        }
+    }
+
+    public static void callList(int list) {
+        if (list <= 0 || list > displayLists.size()) {
+            return;
+        }
+        for (Runnable r : displayLists.get(list - 1)) {
+            r.run();
+        }
+    }
+
+    public static void deleteLists(int list, int range) {
+        for (int i = list; i < list + range; i++) {
+            if (i > 0 && i <= displayLists.size()) {
+                displayLists.set(i - 1, new ArrayList<>());
+            }
+        }
+    }
+
     public static void normal3f(float x, float y, float z) {
         currentNormal[0] = x;
         currentNormal[1] = y;
@@ -558,6 +711,12 @@ public final class GLEmu {
     public static void loadIdentity() {
         MatrixStack s = stack();
         Mat4.setIdentity(s.top());
+        s.changed();
+    }
+
+    public static void loadMatrixf(float[] m) {
+        MatrixStack s = stack();
+        System.arraycopy(m, 0, s.top(), 0, 16);
         s.changed();
     }
 
@@ -1592,7 +1751,90 @@ public final class GLEmu {
         if (pname == 35716) {
             return p.log.length();
         }
+        if (pname == 35718 || pname == 35721) { // ACTIVE_UNIFORMS, ACTIVE_ATTRIBUTES (Iris lists a program's uniforms)
+            return p.linked ? activeCount(gl, p.program, pname) : 0;
+        }
         return 0;
+    }
+
+    @org.teavm.jso.JSBody(params = {"gl", "program", "pname"}, script = "return gl.getProgramParameter(program, pname) | 0;")
+    private static native int activeCount(WebGL2RenderingContext gl, WebGLProgram program, int pname);
+
+    @org.teavm.jso.JSBody(params = {"gl", "program", "index"}, script = "var i = gl.getActiveUniform(program, index);"
+            + " return i ? [i.name, i.size, i.type] : null;")
+    private static native org.teavm.jso.core.JSArray<org.teavm.jso.JSObject> activeUniform(WebGL2RenderingContext gl,
+            WebGLProgram program, int index);
+
+    @org.teavm.jso.JSBody(params = "o", script = "return String(o);")
+    private static native String jsString(org.teavm.jso.JSObject o);
+
+    @org.teavm.jso.JSBody(params = "o", script = "return o | 0;")
+    private static native int jsInt(org.teavm.jso.JSObject o);
+
+    /** glGetActiveUniform: the name, with size and type written to the buffers. */
+    public static String getActiveUniform(int program, int index, java.nio.IntBuffer size, java.nio.IntBuffer type) {
+        UserProgram p = programs.get(program);
+        org.teavm.jso.core.JSArray<org.teavm.jso.JSObject> info = p.linked ? activeUniform(gl, p.program, index) : null;
+        if (info == null) {
+            return "";
+        }
+        if (size != null && size.hasRemaining()) {
+            size.put(size.position(), jsInt(info.get(1)));
+        }
+        if (type != null && type.hasRemaining()) {
+            type.put(type.position(), jsInt(info.get(2)));
+        }
+        return jsString(info.get(0));
+    }
+
+    public static void detachShader(int program, int shader) {
+        UserProgram p = programs.get(program);
+        WebGLShader s = (WebGLShader) get(shaders, shader);
+        if (p != null && s != null) {
+            gl.detachShader(p.program, s);
+        }
+        if (p != null) {
+            p.shaders.remove((Integer) shader);
+        }
+    }
+
+    /** glDrawBuffers: the colour attachments the current framebuffer draws to (Iris' multiple render targets). */
+    public static void drawBuffers(int[] buffers) {
+        gl.drawBuffers(buffers);
+    }
+
+    public static void readBuffer(int mode) {
+        gl.readBuffer(mode);
+    }
+
+    public static void generateMipmap(int target) {
+        gl.generateMipmap(WebGL2RenderingContext.TEXTURE_2D);
+    }
+
+    public static void copyTexImage2D(int target, int level, int internal, int x, int y, int w, int h, int border) {
+        gl.copyTexImage2D(WebGL2RenderingContext.TEXTURE_2D, level, internal == GLConst.RGBA || internal == 4 ? 32856
+                : internal, x, y, w, h, 0);
+    }
+
+    public static void uniform2i(int location, int x, int y) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform2i(l, x, y);
+        }
+    }
+
+    public static void uniform3i(int location, int x, int y, int z) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform3i(l, x, y, z);
+        }
+    }
+
+    public static void uniform4i(int location, int x, int y, int z, int w) {
+        WebGLUniformLocation l = loc(location);
+        if (l != null) {
+            gl.uniform4i(l, x, y, z, w);
+        }
     }
 
     public static String getProgramInfoLog(int program) {

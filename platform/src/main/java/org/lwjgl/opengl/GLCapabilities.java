@@ -10,6 +10,8 @@ public final class GLCapabilities {
     public final boolean OpenGL21 = true;
     public final boolean OpenGL30 = true;
     public final boolean OpenGL31 = false;
+    public final boolean OpenGL42 = false;
+    public final boolean GL_EXT_shader_image_load_store = false;
     public final boolean OpenGL32 = false;
     public final boolean OpenGL33 = false;
     public final boolean OpenGL43 = false;

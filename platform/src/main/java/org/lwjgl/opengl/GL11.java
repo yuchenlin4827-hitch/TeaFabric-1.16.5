@@ -54,6 +54,52 @@ public class GL11 {
         WebGLAccess.gl().clearStencil(s);
     }
 
+    // ---- OpenGL 1.1 immediate mode and display lists (emulated by GLEmu)
+
+    public static void glBegin(int mode) {
+        GLEmu.begin(mode);
+    }
+
+    public static void glEnd() {
+        GLEmu.end();
+    }
+
+    public static void glVertex2f(float x, float y) {
+        GLEmu.vertex(x, y, 0);
+    }
+
+    public static void glVertex2d(double x, double y) {
+        GLEmu.vertex((float) x, (float) y, 0);
+    }
+
+    public static void glVertex3f(float x, float y, float z) {
+        GLEmu.vertex(x, y, z);
+    }
+
+    public static void glVertex3d(double x, double y, double z) {
+        GLEmu.vertex((float) x, (float) y, (float) z);
+    }
+
+    public static int glGenLists(int range) {
+        return GLEmu.genLists(range);
+    }
+
+    public static void glNewList(int list, int mode) {
+        GLEmu.newList(list, mode);
+    }
+
+    public static void glEndList() {
+        GLEmu.endList();
+    }
+
+    public static void glCallList(int list) {
+        GLEmu.callList(list);
+    }
+
+    public static void glDeleteLists(int list, int range) {
+        GLEmu.deleteLists(list, range);
+    }
+
     public static void glColor4f(float r, float g, float b, float a) {
         GLEmu.color4f(r, g, b, a);
     }
@@ -236,6 +282,14 @@ public class GL11 {
 
     public static void glMultMatrixf(FloatBuffer m) {
         GLEmu.multMatrixf(GLEmu.readFloats(m, 16));
+    }
+
+    public static void glLoadMatrixf(FloatBuffer m) {
+        GLEmu.loadMatrixf(GLEmu.readFloats(m, 16));
+    }
+
+    public static void glLoadMatrixf(float[] m) {
+        GLEmu.loadMatrixf(m);
     }
 
     public static void glMultMatrixf(float[] m) {
