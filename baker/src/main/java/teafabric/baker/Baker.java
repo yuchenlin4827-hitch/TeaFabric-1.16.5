@@ -119,6 +119,7 @@ public final class Baker implements PreLaunchEntrypoint {
         resources.put("teafabric/mods.json", json.toString().getBytes(StandardCharsets.UTF_8));
 
         ModCompat.apply(classes, resources);
+        emptyEarlyRisers(mods);
         writeReflectiveClasses();
         generateSyntheticClasses();
         collectMixinExtrasClasses();
@@ -439,6 +440,40 @@ public final class Baker implements PreLaunchEntrypoint {
             customValue(sb, e.getValue());
         }
         sb.append("}}");
+    }
+
+    /**
+     * Manningham Mills' early risers (Runnables that transform classes while the game launches) already ran in
+     * the baker; their run() is emptied so none of their ASM code is compiled in.
+     */
+    private void emptyEarlyRisers(List<ModContainerImpl> mods) {
+        for (ModContainerImpl mod : mods) {
+            for (net.fabricmc.loader.api.metadata.EntrypointMetadata ep
+                    : mod.getMetadata().getEntrypoints("mm:early_risers")) {
+                String internal = ep.getValue().replace('.', '/');
+                byte[] bytes = classes.get(internal);
+                if (bytes == null) {
+                    continue;
+                }
+                org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+                new org.objectweb.asm.ClassReader(bytes).accept(node, 0);
+                node.methods.removeIf(m -> m.name.startsWith("lambda$"));
+                for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+                    if (m.name.equals("run") && m.desc.equals("()V")) {
+                        m.instructions = new org.objectweb.asm.tree.InsnList();
+                        m.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.RETURN));
+                        m.tryCatchBlocks.clear();
+                        if (m.localVariables != null) {
+                            m.localVariables.clear();
+                        }
+                    }
+                }
+                org.objectweb.asm.ClassWriter w = new org.objectweb.asm.ClassWriter(org.objectweb.asm.ClassWriter.COMPUTE_MAXS);
+                node.accept(w);
+                classes.put(internal, w.toByteArray());
+                System.out.println("[baker] Emptied early riser " + internal);
+            }
+        }
     }
 
     /** Every string in the mods' custom metadata (some name classes that a mod instantiates by name). */
