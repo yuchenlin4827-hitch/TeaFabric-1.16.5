@@ -185,7 +185,17 @@ public final class GLEmu {
         GLConst.EYE_LINEAR}, {GLConst.EYE_LINEAR, GLConst.EYE_LINEAR, GLConst.EYE_LINEAR, GLConst.EYE_LINEAR},
         {GLConst.EYE_LINEAR, GLConst.EYE_LINEAR, GLConst.EYE_LINEAR, GLConst.EYE_LINEAR}};
     private static final float[][][] texGenPlane = new float[3][4][];
-    private static final int[] boundTexture = new int[3];
+    /** Texture bound to each unit (all 32; the fixed-function state above exists for units 0 to 2 only). */
+    private static final int[] boundTexture = new int[32];
+    private static final MatrixStack unusedTextureMatrix = new MatrixStack(16);
+    private static final TexEnv unusedTexEnv = new TexEnv();
+    private static final int[] unusedTexGenMode = new int[4];
+    private static final float[][] unusedTexGenPlane = new float[4][];
+
+    /** Fixed-function texture state exists for units 0 to 2 (what Minecraft uses). */
+    private static boolean ffUnit() {
+        return activeTexture < 3;
+    }
 
     private static boolean alphaTest;
     private static int alphaFunc = GLConst.ALWAYS;
@@ -350,7 +360,7 @@ public final class GLEmu {
     /** glIsEnabled: the emulated fixed-function capabilities from the emulation's state, others from WebGL. */
     public static boolean isEnabled(int cap) {
         switch (cap) {
-            case GLConst.TEXTURE_2D: return texture2D[activeTexture];
+            case GLConst.TEXTURE_2D: return ffUnit() && texture2D[activeTexture];
             case GLConst.ALPHA_TEST: return alphaTest;
             case GLConst.FOG: return fog;
             case GLConst.LIGHTING: return lighting;
@@ -372,7 +382,11 @@ public final class GLEmu {
 
     private static void setCap(int cap, boolean on) {
         switch (cap) {
-            case GLConst.TEXTURE_2D: texture2D[activeTexture] = on; return;
+            case GLConst.TEXTURE_2D:
+                if (ffUnit()) {
+                    texture2D[activeTexture] = on;
+                }
+                return;
             case GLConst.ALPHA_TEST: alphaTest = on; return;
             case GLConst.FOG: fog = on; return;
             case GLConst.LIGHTING: lighting = on; return;
@@ -381,7 +395,9 @@ public final class GLEmu {
             case GLConst.TEXTURE_GEN_S: case GLConst.TEXTURE_GEN_T: case GLConst.TEXTURE_GEN_R:
             case GLConst.TEXTURE_GEN_Q: {
                 int bit = 1 << (cap - GLConst.TEXTURE_GEN_S);
-                texGenMask[activeTexture] = on ? texGenMask[activeTexture] | bit : texGenMask[activeTexture] & ~bit;
+                if (ffUnit()) {
+                    texGenMask[activeTexture] = on ? texGenMask[activeTexture] | bit : texGenMask[activeTexture] & ~bit;
+                }
                 return;
             }
             case GLConst.COLOR_LOGIC_OP: colorLogicOp = on; applyBlend(); return;
@@ -694,19 +710,19 @@ public final class GLEmu {
 
     public static void texEnvi(int target, int pname, int param) {
         if (target == GLConst.TEXTURE_ENV) {
-            texEnv[activeTexture].set(pname, param);
+            (ffUnit() ? texEnv[activeTexture] : unusedTexEnv).set(pname, param);
         }
     }
 
     public static void texEnvfv(int target, int pname, float[] v) {
         if (target == GLConst.TEXTURE_ENV && pname == GLConst.TEXTURE_ENV_COLOR) {
-            System.arraycopy(v, 0, texEnv[activeTexture].color, 0, 4);
+            System.arraycopy(v, 0, (ffUnit() ? texEnv[activeTexture] : unusedTexEnv).color, 0, 4);
         }
     }
 
     public static void texGeni(int coord, int pname, int param) {
         if (pname == GLConst.TEXTURE_GEN_MODE) {
-            texGenMode[activeTexture][coord - GLConst.S] = param;
+            (ffUnit() ? texGenMode[activeTexture] : unusedTexGenMode)[coord - GLConst.S] = param;
         }
     }
 
@@ -720,9 +736,9 @@ public final class GLEmu {
             }
             float[] out = new float[4];
             Mat4.transformRow(plane, inv, out);
-            texGenPlane[activeTexture][c] = out;
+            (ffUnit() ? texGenPlane[activeTexture] : unusedTexGenPlane)[c] = out;
         } else if (pname == GLConst.OBJECT_PLANE) {
-            texGenPlane[activeTexture][c] = plane.clone();
+            (ffUnit() ? texGenPlane[activeTexture] : unusedTexGenPlane)[c] = plane.clone();
         }
     }
 
@@ -731,7 +747,7 @@ public final class GLEmu {
     private static MatrixStack stack() {
         switch (matrixMode) {
             case GLConst.PROJECTION: return projection;
-            case GLConst.TEXTURE: return textureMatrix[activeTexture];
+            case GLConst.TEXTURE: return ffUnit() ? textureMatrix[activeTexture] : unusedTextureMatrix;
             default: return modelview;
         }
     }
@@ -795,7 +811,7 @@ public final class GLEmu {
         switch (pname) {
             case GLConst.MODELVIEW_MATRIX: src = modelview.top(); break;
             case GLConst.PROJECTION_MATRIX: src = projection.top(); break;
-            case GLConst.TEXTURE_MATRIX: src = textureMatrix[activeTexture].top(); break;
+            case GLConst.TEXTURE_MATRIX: src = (ffUnit() ? textureMatrix[activeTexture] : unusedTextureMatrix).top(); break;
             case GLConst.FOG_COLOR: src = fogColor; break;
             case 2816: src = currentColor; break; // GL_CURRENT_COLOR
             case GLConst.FOG_DENSITY: src = new float[] {fogDensity}; break;
@@ -854,7 +870,7 @@ public final class GLEmu {
     }
 
     public static void activeTexture(int texture) {
-        activeTexture = Math.max(0, Math.min(2, texture - GLConst.TEXTURE0));
+        activeTexture = Math.max(0, Math.min(31, texture - GLConst.TEXTURE0));
         glActive(texture);
     }
 
@@ -1378,7 +1394,7 @@ public final class GLEmu {
                 texParams[id] = null;
             }
         }
-        for (int u = 0; u < 3; u++) {
+        for (int u = 0; u < boundTexture.length; u++) {
             if (boundTexture[u] == id) {
                 boundTexture[u] = 0;
             }
@@ -1908,6 +1924,8 @@ public final class GLEmu {
         int[] bound = (int[]) s[2];
         for (int u = 0; u < 3; u++) {
             texEnv[u].copyFrom(envs[u]);
+        }
+        for (int u = 0; u < boundTexture.length; u++) {
             if (bound[u] != boundTexture[u]) {
                 glActive(GLConst.TEXTURE0 + u);
                 boundTexture[u] = bound[u];
