@@ -489,6 +489,7 @@ public final class Baker implements PreLaunchEntrypoint {
      */
     private java.util.Set<String> dataClasses() {
         java.util.Set<String> roots = new java.util.TreeSet<>();
+        java.util.Set<String> selfOnly = new java.util.TreeSet<>(); // their own fields only, no closure
         byte[] configData = "ConfigData".getBytes(StandardCharsets.ISO_8859_1);
         byte[] fromJson = "fromJson".getBytes(StandardCharsets.ISO_8859_1);
         byte[] getDeclaredField = "getDeclaredField".getBytes(StandardCharsets.ISO_8859_1);
@@ -544,7 +545,7 @@ public final class Baker implements PreLaunchEntrypoint {
                                     && ((org.objectweb.asm.tree.LdcInsnNode) p).cst instanceof org.objectweb.asm.Type) {
                                 org.objectweb.asm.Type t = (org.objectweb.asm.Type) ((org.objectweb.asm.tree.LdcInsnNode) p).cst;
                                 if (t.getSort() == org.objectweb.asm.Type.OBJECT) {
-                                    roots.add(t.getInternalName());
+                                    (fieldLookup ? selfOnly : roots).add(t.getInternalName());
                                 }
                                 break;
                             }
@@ -572,10 +573,20 @@ public final class Baker implements PreLaunchEntrypoint {
             }
         }
         java.util.Set<String> out = new java.util.TreeSet<>();
+        for (String c : selfOnly) {
+            if (isModClass(c)) {
+                out.add(c);
+            }
+        }
+        java.util.Set<String> prefixes = new java.util.HashSet<>();
+        for (String r : roots) {
+            prefixes.add(packagePrefix(r));
+        }
         java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>(roots);
         while (!queue.isEmpty()) {
             String c = queue.poll();
-            if (!isModClass(c) || !out.add(c)) {
+            // the classes of a config's fields, as far as they belong to the same mod (same package tree)
+            if (!isModClass(c) || !prefixes.contains(packagePrefix(c)) || !out.add(c)) {
                 continue;
             }
             org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
@@ -810,6 +821,16 @@ public final class Baker implements PreLaunchEntrypoint {
             }
         }
         return out;
+    }
+
+    /** The first three package segments ("com/example/mod"): one mod's package tree. */
+    private static String packagePrefix(String c) {
+        String[] parts = c.split("/");
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < Math.min(3, parts.length - 1); i++) {
+            b.append(parts[i]).append('/');
+        }
+        return b.toString();
     }
 
     private boolean isModClass(String c) {
