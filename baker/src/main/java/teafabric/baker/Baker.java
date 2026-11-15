@@ -491,11 +491,16 @@ public final class Baker implements PreLaunchEntrypoint {
         java.util.Set<String> roots = new java.util.TreeSet<>();
         byte[] configData = "ConfigData".getBytes(StandardCharsets.ISO_8859_1);
         byte[] fromJson = "fromJson".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] getDeclaredField = "getDeclaredField".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] configBytes = "Config".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] configLower = "config".getBytes(StandardCharsets.ISO_8859_1);
         for (Map.Entry<String, byte[]> e : classes.entrySet()) {
             byte[] b = e.getValue();
             boolean cd = contains(b, configData);
-            boolean fj = contains(b, fromJson);
-            if (!cd && !fj) {
+            boolean fj = contains(b, fromJson) || contains(b, getDeclaredField) || contains(b, configBytes)
+                    || contains(b, configLower);
+            if ((!cd && !fj) || e.getKey().startsWith("net/minecraft/") || e.getKey().startsWith("com/mojang/")
+                    || e.getKey().startsWith("groovy") || e.getKey().startsWith("org/codehaus/")) {
                 continue;
             }
             org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
@@ -511,20 +516,36 @@ public final class Baker implements PreLaunchEntrypoint {
                 for (org.objectweb.asm.tree.MethodNode m : node.methods) {
                     for (org.objectweb.asm.tree.AbstractInsnNode insn = m.instructions.getFirst(); insn != null;
                             insn = insn.getNext()) {
-                        if (!(insn instanceof org.objectweb.asm.tree.MethodInsnNode)
-                                || !((org.objectweb.asm.tree.MethodInsnNode) insn).name.equals("fromJson")
-                                || !((org.objectweb.asm.tree.MethodInsnNode) insn).desc.contains("Ljava/lang/Class;)")) {
+                        if (!(insn instanceof org.objectweb.asm.tree.MethodInsnNode)) {
+                            continue;
+                        }
+                        org.objectweb.asm.tree.MethodInsnNode call = (org.objectweb.asm.tree.MethodInsnNode) insn;
+                        // fromJson(..., X.class) of Gson/Jankson; X.class passed to a config library's method or
+                        // constructor (AutoConfig.register, WTHIT's JsonConfig.Builder); X.class.getDeclaredField
+                        // (REI sets its Internals' static fields by name)
+                        boolean classArg = call.desc.contains("Ljava/lang/Class;");
+                        boolean fromJsonCall = call.name.equals("fromJson") && call.desc.contains("Ljava/lang/Class;)");
+                        boolean configCall = classArg && call.owner.toLowerCase(java.util.Locale.ROOT).contains("config")
+                                && !call.owner.startsWith("java/");
+                        boolean fieldLookup = call.owner.equals("java/lang/Class")
+                                && (call.name.equals("getDeclaredField") || call.name.equals("getDeclaredFields"));
+                        if (!fromJsonCall && !configCall && !fieldLookup) {
                             continue;
                         }
                         org.objectweb.asm.tree.AbstractInsnNode p = insn.getPrevious();
-                        while (p != null && p.getOpcode() < 0) {
-                            p = p.getPrevious();
-                        }
-                        if (p instanceof org.objectweb.asm.tree.LdcInsnNode
-                                && ((org.objectweb.asm.tree.LdcInsnNode) p).cst instanceof org.objectweb.asm.Type) {
-                            org.objectweb.asm.Type t = (org.objectweb.asm.Type) ((org.objectweb.asm.tree.LdcInsnNode) p).cst;
-                            if (t.getSort() == org.objectweb.asm.Type.OBJECT) {
-                                roots.add(t.getInternalName());
+                        int back = fromJsonCall ? 1 : 4;
+                        for (int k = 0; p != null && k < back; p = p.getPrevious()) {
+                            if (p.getOpcode() < 0) {
+                                continue;
+                            }
+                            k++;
+                            if (p instanceof org.objectweb.asm.tree.LdcInsnNode
+                                    && ((org.objectweb.asm.tree.LdcInsnNode) p).cst instanceof org.objectweb.asm.Type) {
+                                org.objectweb.asm.Type t = (org.objectweb.asm.Type) ((org.objectweb.asm.tree.LdcInsnNode) p).cst;
+                                if (t.getSort() == org.objectweb.asm.Type.OBJECT) {
+                                    roots.add(t.getInternalName());
+                                }
+                                break;
                             }
                         }
                     }
@@ -660,6 +681,13 @@ public final class Baker implements PreLaunchEntrypoint {
             lk.visitVarInsn(Opcodes.ALOAD, 0);
             lk.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "equals", "(Ljava/lang/Object;)Z", false);
             lk.visitJumpInsn(Opcodes.IFEQ, next);
+            // Class.forName runs the static initialiser (Night Config's formats register themselves there);
+            // a class literal does not, reading a static field does.
+            org.objectweb.asm.tree.FieldNode sf = staticField(c);
+            if (sf != null) {
+                lk.visitFieldInsn(Opcodes.GETSTATIC, c, sf.name, sf.desc);
+                lk.visitInsn(org.objectweb.asm.Type.getType(sf.desc).getSize() == 2 ? Opcodes.POP2 : Opcodes.POP);
+            }
             lk.visitLdcInsn(org.objectweb.asm.Type.getObjectType(c));
             lk.visitInsn(Opcodes.ARETURN);
             lk.visitLabel(next);
@@ -670,6 +698,29 @@ public final class Baker implements PreLaunchEntrypoint {
         lk.visitEnd();
         cw.visitEnd();
         return cw.toByteArray();
+    }
+
+    /** A static field of a class that has a static initialiser, or null. */
+    private org.objectweb.asm.tree.FieldNode staticField(String c) {
+        byte[] b = classes.get(c);
+        if (b == null) {
+            return null;
+        }
+        org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+        new org.objectweb.asm.ClassReader(b).accept(node, org.objectweb.asm.ClassReader.SKIP_CODE);
+        boolean clinit = false;
+        for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+            clinit |= m.name.equals("<clinit>");
+        }
+        if (!clinit || (node.access & Opcodes.ACC_INTERFACE) != 0) {
+            return null;
+        }
+        for (org.objectweb.asm.tree.FieldNode f : node.fields) {
+            if ((f.access & Opcodes.ACC_STATIC) != 0) {
+                return f;
+            }
+        }
+        return null;
     }
 
     /**
