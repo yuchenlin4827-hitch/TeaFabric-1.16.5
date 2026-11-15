@@ -123,8 +123,13 @@ public class RedirectTransformer implements ClassHolderTransformer {
         }
     }
 
-    /** A JNI native: no TeaVM interop / generator / JSO annotation on it. */
+    /** A JNI native: no TeaVM interop / generator / JSO annotation on it, and not in a class TeaVM generated. */
     private static boolean isPlainJni(MethodHolder method) {
+        // Annotation values: TeaVM's annotation support declares them as natives of "<Annotation>$$_nativeData"
+        // and its backend supplies them (Cloth Config's AutoConfig reads @Config(name = ...)).
+        if (method.getOwnerName().contains("$$_")) {
+            return false;
+        }
         for (org.teavm.model.AnnotationHolder a : method.getAnnotations().all()) {
             String name = a.getType();
             if (name.startsWith("org.teavm.")) {

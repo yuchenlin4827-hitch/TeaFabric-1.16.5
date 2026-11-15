@@ -5,12 +5,25 @@ compiles the game together with the mods into one WebAssembly module. A built pa
 jar on its own (there is no JVM or class loader in the browser), so adding or removing a mod always
 means running the build again. Jars in this folder are git-ignored.
 
-Tested optimization mods (all four together; the build adapts them to the browser automatically, see
-"Optimization mods" in the main README):
+`scripts/get-mods.sh` downloads the tested set from Modrinth (each file checked against its SHA-512):
 
-* Sodium 0.2.0+build.4 (`sodium-fabric-mc1.16.5-0.2.0+build.4.jar`): renderer
-* Lithium 0.6.6 (`lithium-fabric-mc1.16.5-0.6.6.jar`): game logic
-* Phosphor 0.8.0 (`phosphor-fabric-mc1.16.2-0.8.0.jar`): lighting engine
-* FerriteCore 2.1.1 (`ferritecore-2.1.1-fabric.jar`): memory use
+* every mod of **Fabulously Optimized 1.12.3**, its last pack for Minecraft 1.16.5: Sodium, Lithium,
+  Phosphor, FerriteCore, Iris, Indium, Sodium Extra, Reese's Sodium Options, LazyDFU, Smooth Boot,
+  Entity Culling, Dynamic FPS, Cull Leaves, LambDynamicLights, LambdaBetterGrass, Colormatic, CEM, Better
+  Beds, Fast Chest, Mod Menu, Cloth Config and Cloth API, Architectury, Not Enough Crashes, Slight GUI
+  Modifications, Borderless Mining, Capes, Custom Fog, Fabrishot, WI Zoom, Advancement Info, AntiGhost,
+  No Fade, No Potion Offset, Tooltip Fix, Item Model Fix, Fast Open Links and Folders, YOSBR and Fabric
+  Language Kotlin. Three are left out: Fabric API (the build already includes it), FerriteCore 2.1.0
+  (2.1.1 is used instead) and Hydrogen (optional in the pack and off on Java 16 and later; it generates
+  classes at run time);
+* UI and helper mods: Roughly Enough Items, AppleSkin, WTHIT, Mouse Wheelie, BetterF3, Light Overlay,
+  ShulkerBoxTooltip.
 
-Iris (shader packs) does not work in the browser build; the main README explains why.
+Map mods (Xaero's, JourneyMap) are not included: their licences forbid redistributing modified copies,
+which a compiled build is.
+
+The build adapts what these mods rely on that a browser does not have, only when the mod is present
+(see "Mods" in the main README): Architectury's platform calls, Not Enough Crashes' start-up (mapping
+download, log rewriting, System.exit blocking), Main.main injections, Light Overlay's method handle,
+Sodium's worker threads, FerriteCore's run-time class definition, Slight GUI Modifications' Groovy
+scripting, and more in `baker/src/main/java/teafabric/baker/ModCompat.java`.

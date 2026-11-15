@@ -39,6 +39,45 @@ final class ModCompat {
         notEnoughCrashes(classes);
         lightOverlay(classes);
         mainHooks(classes);
+        ArchitecturyEvents.apply(classes);
+        amecs(classes);
+    }
+
+    /**
+     * Amecs (bundled in Mouse Wheelie) reaches the key binding map through a static method its mixin adds to
+     * KeyBinding, looked up by reflection; the call becomes direct (without it, loading the options failed).
+     */
+    private static void amecs(Map<String, byte[]> classes) {
+        String utils = "de/siphalor/amecs/api/KeyBindingUtils";
+        String key = "net/minecraft/class_304";
+        if (!classes.containsKey(utils) || !classes.containsKey(key)) {
+            return;
+        }
+        boolean[] found = new boolean[1];
+        patch(classes, key, node -> {
+            MethodNode m = method(node, "amecs$getIdToKeyBindingMap", "()Ljava/util/Map;");
+            if (m == null) {
+                return false;
+            }
+            m.access = (m.access & ~Opcodes.ACC_PRIVATE) | Opcodes.ACC_PUBLIC;
+            found[0] = true;
+            return true;
+        });
+        if (!found[0]) {
+            return;
+        }
+        patch(classes, utils, node -> {
+            MethodNode m = method(node, "getIdToKeyBindingMap", "()Ljava/util/Map;");
+            if (m == null) {
+                return false;
+            }
+            InsnList code = new InsnList();
+            code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, key, "amecs$getIdToKeyBindingMap", "()Ljava/util/Map;",
+                    false));
+            code.add(new InsnNode(Opcodes.ARETURN));
+            replace(m, code);
+            return true;
+        });
     }
 
     static final String MAIN_HOOKS = "teafabric/generated/MainHooks";
