@@ -679,6 +679,9 @@ public final class Baker implements PreLaunchEntrypoint {
         };
         cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER, "teafabric/generated/Reflective",
                 null, "java/lang/Object", null);
+        for (String sink : new String[] {"Ljava/lang/Object;", "I", "J", "F", "D"}) {
+            cw.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "sink" + sink.charAt(0), sink, null, null).visitEnd();
+        }
         java.util.List<String> all = new java.util.ArrayList<>(keep);
         int chunk = 300;
         int parts = (all.size() + chunk - 1) / chunk;
@@ -727,10 +730,14 @@ public final class Baker implements PreLaunchEntrypoint {
                 lk.visitJumpInsn(Opcodes.IFEQ, next);
                 // Class.forName runs the static initialiser (Night Config's formats register themselves there);
                 // a class literal does not, reading a static field does.
+                // The value goes into a sink field: TeaVM removes a read whose value is unused, and with it the
+                // class initialisation that the read implies.
                 org.objectweb.asm.tree.FieldNode sf = staticField(c);
                 if (sf != null) {
                     lk.visitFieldInsn(Opcodes.GETSTATIC, c, sf.name, sf.desc);
-                    lk.visitInsn(org.objectweb.asm.Type.getType(sf.desc).getSize() == 2 ? Opcodes.POP2 : Opcodes.POP);
+                    String sink = sinkDescriptor(sf.desc);
+                    lk.visitFieldInsn(Opcodes.PUTSTATIC, "teafabric/generated/Reflective", "sink" + sink.charAt(0),
+                            sink);
                 }
                 lk.visitLdcInsn(org.objectweb.asm.Type.getObjectType(c));
                 lk.visitInsn(Opcodes.ARETURN);
@@ -781,7 +788,19 @@ public final class Baker implements PreLaunchEntrypoint {
         return cw.toByteArray();
     }
 
-    /** A static field of a class that has a static initialiser, or null. */
+    /** The sink field type for a value of the given field type (int for the small primitive types). */
+    private static String sinkDescriptor(String desc) {
+        switch (desc.charAt(0)) {
+            case 'Z': case 'B': case 'C': case 'S': case 'I':
+                return "I";
+            case 'J': case 'F': case 'D':
+                return desc;
+            default:
+                return "Ljava/lang/Object;";
+        }
+    }
+
+    /** A static field of a class that has a static initialiser (preferably not a constant), or null. */
     private org.objectweb.asm.tree.FieldNode staticField(String c) {
         byte[] b = classes.get(c);
         if (b == null) {
@@ -796,12 +815,16 @@ public final class Baker implements PreLaunchEntrypoint {
         if (!clinit || (node.access & Opcodes.ACC_INTERFACE) != 0) {
             return null;
         }
+        org.objectweb.asm.tree.FieldNode constant = null;
         for (org.objectweb.asm.tree.FieldNode f : node.fields) {
             if ((f.access & Opcodes.ACC_STATIC) != 0) {
-                return f;
+                if (f.value == null) {
+                    return f;
+                }
+                constant = constant != null ? constant : f;
             }
         }
-        return null;
+        return constant;
     }
 
     /**

@@ -42,6 +42,63 @@ final class ModCompat {
         ArchitecturyEvents.apply(classes);
         amecs(classes);
         shulkerBoxTooltip(classes);
+        nightConfig(classes);
+    }
+
+    /**
+     * Night Config (shaded into LambDynamicLights and LambdaBetterGrass) finds its file formats by loading them
+     * with Class.forName, whose static initialiser registers the file extension. The static initialiser of
+     * FormatDetector registers each format of the same copy directly instead (by its instance() method).
+     */
+    private static void nightConfig(Map<String, byte[]> classes) {
+        String suffix = "/core/file/FormatDetector";
+        String[][] formats = {{"toml/TomlFormat", "toml"}, {"json/JsonFormat", "json"}, {"hocon/HoconFormat", "conf"},
+                {"yaml/YamlFormat", "yaml"}};
+        for (String detector : new java.util.ArrayList<>(classes.keySet())) {
+            if (!detector.endsWith(suffix) || !detector.contains("nightconfig")) {
+                continue;
+            }
+            String root = detector.substring(0, detector.length() - suffix.length());
+            String configFormat = "L" + root + "/core/ConfigFormat;";
+            patch(classes, detector, node -> {
+                MethodNode clinit = method(node, "<clinit>", "()V");
+                MethodNode register = method(node, "registerExtension", "(Ljava/lang/String;" + configFormat + ")V");
+                if (clinit == null || register == null) {
+                    return false;
+                }
+                InsnList code = new InsnList();
+                for (String[] f : formats) {
+                    String format = root + "/" + f[0];
+                    byte[] bytes = classes.get(format);
+                    if (bytes == null) {
+                        continue;
+                    }
+                    ClassNode fn = new ClassNode();
+                    new ClassReader(bytes).accept(fn, ClassReader.SKIP_CODE);
+                    if (method(fn, "instance", "()L" + format + ";") == null) {
+                        continue;
+                    }
+                    code.add(new org.objectweb.asm.tree.LdcInsnNode(f[1]));
+                    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, format, "instance", "()L" + format + ";", false));
+                    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, detector, "registerExtension",
+                            "(Ljava/lang/String;" + configFormat + ")V", false));
+                    System.out.println("[baker] Night Config: " + format + " registered for ." + f[1]);
+                }
+                if (code.size() == 0) {
+                    return false;
+                }
+                for (AbstractInsnNode insn = clinit.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (insn.getOpcode() == Opcodes.RETURN) {
+                        InsnList copy = new InsnList();
+                        for (AbstractInsnNode c = code.getFirst(); c != null; c = c.getNext()) {
+                            copy.add(c.clone(java.util.Collections.emptyMap()));
+                        }
+                        clinit.instructions.insertBefore(insn, copy);
+                    }
+                }
+                return true;
+            });
+        }
     }
 
     /**
