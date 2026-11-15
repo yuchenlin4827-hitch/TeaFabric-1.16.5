@@ -596,14 +596,48 @@ public final class Baker implements PreLaunchEntrypoint {
         }
     }
 
-    /** A class whose classes() returns the given classes, so the compiler keeps them for Class.forName. */
-    private static byte[] reflectiveKeeper(java.util.Set<String> keep) {
-        org.objectweb.asm.ClassWriter cw = new org.objectweb.asm.ClassWriter(org.objectweb.asm.ClassWriter.COMPUTE_MAXS);
+    /**
+     * A class whose classes(boolean) returns the given classes. TeaVM's Class.forName only finds classes that the
+     * program instantiates or otherwise reaches, and a class literal is not enough: with true (never passed) it
+     * would also instantiate the concrete ones, which makes the compiler keep them.
+     */
+    private byte[] reflectiveKeeper(java.util.Set<String> keep) {
+        org.objectweb.asm.ClassWriter cw = new org.objectweb.asm.ClassWriter(
+                org.objectweb.asm.ClassWriter.COMPUTE_MAXS | org.objectweb.asm.ClassWriter.COMPUTE_FRAMES) {
+            @Override
+            protected String getCommonSuperClass(String a, String b) {
+                return "java/lang/Object";
+            }
+        };
         cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER, "teafabric/generated/Reflective",
                 null, "java/lang/Object", null);
         org.objectweb.asm.MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "classes",
-                "()[Ljava/lang/Class;", null, null);
+                "(Z)[Ljava/lang/Class;", null, null);
         mv.visitCode();
+        org.objectweb.asm.Label skip = new org.objectweb.asm.Label();
+        mv.visitVarInsn(Opcodes.ILOAD, 0);
+        mv.visitJumpInsn(Opcodes.IFEQ, skip);
+        for (String c : keep) {
+            byte[] bytes = classes.get(c);
+            if (bytes == null) {
+                continue;
+            }
+            org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+            new org.objectweb.asm.ClassReader(bytes).accept(node, org.objectweb.asm.ClassReader.SKIP_CODE);
+            if ((node.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_INTERFACE)) != 0) {
+                continue;
+            }
+            for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+                if (m.name.equals("<init>") && m.desc.equals("()V")) {
+                    mv.visitTypeInsn(Opcodes.NEW, c);
+                    mv.visitInsn(Opcodes.DUP);
+                    mv.visitMethodInsn(Opcodes.INVOKESPECIAL, c, "<init>", "()V", false);
+                    mv.visitInsn(Opcodes.POP);
+                    break;
+                }
+            }
+        }
+        mv.visitLabel(skip);
         mv.visitLdcInsn(keep.size());
         mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Class");
         int i = 0;

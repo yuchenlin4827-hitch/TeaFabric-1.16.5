@@ -63,9 +63,25 @@ public class TeaFabricReflection implements ReflectionSupplier {
         return named;
     }
 
+    /** Libraries that look nothing up by name among themselves (keeps the name table small). */
+    private static final String[] NOT_BY_NAME = {"java.", "javax.", "jdk.", "sun.", "org.teavm.", "com.google.",
+        "io.netty.", "it.unimi.", "org.apache.", "com.ibm.icu.", "kotlin.", "kotlinx.", "org.objectweb.",
+        "joptsimple.", "org.lwjgl.", "groovy", "org.codehaus.", "teafabric."};
+
     @Override
     public boolean isClassFoundByName(ReflectionContext context, String name) {
-        return findable(name) || named(context).contains(name);
+        if (findable(name) || named(context).contains(name)) {
+            return true;
+        }
+        // Mod classes: mods load their own classes by name, sometimes from names built at run time
+        // (Light Overlay: "me.shedaniel.lightoverlay." + loader + ".LightOverlayImpl"). Only classes the program
+        // reaches anyway are affected.
+        for (String p : NOT_BY_NAME) {
+            if (name.startsWith(p)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
