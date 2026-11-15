@@ -139,7 +139,13 @@ final class EntrypointGenerator implements Opcodes {
                 return false;
             }
         }
-        // out.add(new Object[] {modId, instance});
+        // try { out.add(new Object[] {modId, instance}); } catch (Throwable t) { WebFabricLoader.entrypointFailed(...); }
+        Label start = new Label();
+        Label end = new Label();
+        Label handler = new Label();
+        Label after = new Label();
+        mv.visitTryCatchBlock(start, end, handler, "java/lang/Throwable");
+        mv.visitLabel(start);
         mv.visitVarInsn(ALOAD, 1);
         mv.visitInsn(ICONST_2);
         mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
@@ -163,6 +169,16 @@ final class EntrypointGenerator implements Opcodes {
         mv.visitInsn(AASTORE);
         mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z", true);
         mv.visitInsn(POP);
+        mv.visitLabel(end);
+        mv.visitJumpInsn(GOTO, after);
+        mv.visitLabel(handler);
+        mv.visitVarInsn(ASTORE, 2);
+        mv.visitLdcInsn(modId);
+        mv.visitLdcInsn(key);
+        mv.visitVarInsn(ALOAD, 2);
+        mv.visitMethodInsn(INVOKESTATIC, "teafabric/web/fabric/WebFabricLoader", "entrypointFailed",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)V", false);
+        mv.visitLabel(after);
         return true;
     }
 

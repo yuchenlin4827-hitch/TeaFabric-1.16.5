@@ -459,10 +459,24 @@ public final class Baker implements PreLaunchEntrypoint {
                 shown.append(' ').append(s);
             }
         }
+        java.util.Set<String> byName = forNameStrings();
+        for (String c : byName) {
+            list.append(c.replace('/', '.')).append('\n');
+        }
         java.util.Set<String> data = dataClasses();
         for (String d : data) {
             list.append("data ").append(d.replace('/', '.')).append('\n');
         }
+        // TeaVM's Class.forName only finds classes that the program references; this class references them all.
+        java.util.Set<String> keep = new java.util.TreeSet<>(byName);
+        keep.addAll(data);
+        for (String s : CUSTOM_STRINGS) {
+            if (s.indexOf('.') > 0 && s.indexOf(' ') < 0 && classes.containsKey(s.replace('.', '/'))) {
+                keep.add(s.replace('.', '/'));
+            }
+        }
+        classes.put("teafabric/generated/Reflective", reflectiveKeeper(keep));
+        System.out.println("[baker] Classes loaded by name with Class.forName(\"...\"): " + byName.size());
         resources.put("META-INF/teafabric/reflective-classes.txt", list.toString().getBytes(StandardCharsets.UTF_8));
         System.out.println("[baker] Classes named in mod metadata, findable by name:" + shown);
         System.out.println("[baker] Config data classes with reflective fields and constructors: " + data.size());
@@ -517,6 +531,24 @@ public final class Baker implements PreLaunchEntrypoint {
                 }
             }
         }
+        // subclasses of ConfigData implementations (AutoConfig's example extends PartitioningSerializer.GlobalData)
+        java.util.Map<String, String> supers = new java.util.HashMap<>();
+        for (Map.Entry<String, byte[]> e : classes.entrySet()) {
+            try {
+                supers.put(e.getKey(), new org.objectweb.asm.ClassReader(e.getValue()).getSuperName());
+            } catch (RuntimeException ex) {
+                // not a class file we can read
+            }
+        }
+        java.util.Set<String> implementors = new java.util.HashSet<>(roots);
+        for (String c : supers.keySet()) {
+            for (String p = supers.get(c); p != null; p = supers.get(p)) {
+                if (implementors.contains(p)) {
+                    roots.add(c);
+                    break;
+                }
+            }
+        }
         java.util.Set<String> out = new java.util.TreeSet<>();
         java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>(roots);
         while (!queue.isEmpty()) {
@@ -533,10 +565,107 @@ public final class Baker implements PreLaunchEntrypoint {
                 if ((f.access & Opcodes.ACC_STATIC) != 0) {
                     continue;
                 }
+                // classes named in the field's annotations (AutoConfig validators, created by reflection)
+                if (f.visibleAnnotations != null) {
+                    for (org.objectweb.asm.tree.AnnotationNode a : f.visibleAnnotations) {
+                        annotationClasses(a.values, queue);
+                    }
+                }
                 String sig = f.signature != null ? f.signature : f.desc;
                 java.util.regex.Matcher m = java.util.regex.Pattern.compile("L([\\w/$]+)[;<]").matcher(sig);
                 while (m.find()) {
                     queue.add(m.group(1));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void annotationClasses(java.util.List<Object> values, java.util.Deque<String> queue) {
+        if (values == null) {
+            return;
+        }
+        for (Object v : values) {
+            if (v instanceof org.objectweb.asm.Type && ((org.objectweb.asm.Type) v).getSort() == org.objectweb.asm.Type.OBJECT) {
+                queue.add(((org.objectweb.asm.Type) v).getInternalName());
+            } else if (v instanceof java.util.List) {
+                annotationClasses((java.util.List<Object>) v, queue);
+            } else if (v instanceof org.objectweb.asm.tree.AnnotationNode) {
+                annotationClasses(((org.objectweb.asm.tree.AnnotationNode) v).values, queue);
+            }
+        }
+    }
+
+    /** A class whose classes() returns the given classes, so the compiler keeps them for Class.forName. */
+    private static byte[] reflectiveKeeper(java.util.Set<String> keep) {
+        org.objectweb.asm.ClassWriter cw = new org.objectweb.asm.ClassWriter(org.objectweb.asm.ClassWriter.COMPUTE_MAXS);
+        cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER, "teafabric/generated/Reflective",
+                null, "java/lang/Object", null);
+        org.objectweb.asm.MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "classes",
+                "()[Ljava/lang/Class;", null, null);
+        mv.visitCode();
+        mv.visitLdcInsn(keep.size());
+        mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Class");
+        int i = 0;
+        for (String c : keep) {
+            mv.visitInsn(Opcodes.DUP);
+            mv.visitLdcInsn(i++);
+            mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(c));
+            mv.visitInsn(Opcodes.AASTORE);
+        }
+        mv.visitInsn(Opcodes.ARETURN);
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
+        cw.visitEnd();
+        return cw.toByteArray();
+    }
+
+    /**
+     * Class names in string constants of classes that call Class.forName or ClassLoader.loadClass (REI loads its
+     * modules this way, Night Config its formats).
+     */
+    private java.util.Set<String> forNameStrings() {
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        byte[] forName = "forName".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] loadClass = "loadClass".getBytes(StandardCharsets.ISO_8859_1);
+        for (Map.Entry<String, byte[]> e : classes.entrySet()) {
+            String n = e.getKey();
+            if (n.startsWith("net/minecraft/") || n.startsWith("com/mojang/") || n.startsWith("java/")
+                    || n.startsWith("groovy") || n.startsWith("org/codehaus/") || n.startsWith("kotlin/")
+                    || n.startsWith("org/apache/") || n.startsWith("io/netty/") || n.startsWith("com/google/")) {
+                continue;
+            }
+            byte[] b = e.getValue();
+            if (!contains(b, forName) && !contains(b, loadClass)) {
+                continue;
+            }
+            org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+            new org.objectweb.asm.ClassReader(b).accept(node, 0);
+            boolean calls = false;
+            java.util.List<String> strings = new java.util.ArrayList<>();
+            for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+                for (org.objectweb.asm.tree.AbstractInsnNode insn = m.instructions.getFirst(); insn != null;
+                        insn = insn.getNext()) {
+                    if (insn instanceof org.objectweb.asm.tree.MethodInsnNode) {
+                        org.objectweb.asm.tree.MethodInsnNode mi = (org.objectweb.asm.tree.MethodInsnNode) insn;
+                        if ((mi.owner.equals("java/lang/Class") && mi.name.equals("forName"))
+                                || (mi.owner.equals("java/lang/ClassLoader") && mi.name.equals("loadClass"))) {
+                            calls = true;
+                        }
+                    } else if (insn instanceof org.objectweb.asm.tree.LdcInsnNode
+                            && ((org.objectweb.asm.tree.LdcInsnNode) insn).cst instanceof String) {
+                        strings.add((String) ((org.objectweb.asm.tree.LdcInsnNode) insn).cst);
+                    }
+                }
+            }
+            if (!calls) {
+                continue;
+            }
+            for (String s : strings) {
+                String internal = s.replace('.', '/');
+                if (s.indexOf('.') > 0 && s.indexOf(' ') < 0 && s.indexOf('/') < 0 && classes.containsKey(internal)
+                        && !internal.startsWith("net/minecraft/")) {
+                    out.add(internal);
                 }
             }
         }

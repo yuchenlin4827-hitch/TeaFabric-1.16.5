@@ -310,6 +310,37 @@ public final class LangCompat {
         writer.flush();
     }
 
+    /**
+     * Properties.store(OutputStream, String): ISO 8859-1 with \\uXXXX escapes, as in the JDK (TeaVM's version asks
+     * for the charset by a name it does not know; Indigo and Indium store their settings this way).
+     */
+    public static void store(java.util.Properties props, java.io.OutputStream out, String comments)
+            throws java.io.IOException {
+        java.io.StringWriter w = new java.io.StringWriter();
+        store(props, w, comments);
+        String text = w.toString();
+        byte[] bytes = new byte[text.length() * 6];
+        int n = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c < 0x100) {
+                bytes[n++] = (byte) c;
+            } else {
+                String hex = Integer.toHexString(c);
+                bytes[n++] = '\\';
+                bytes[n++] = 'u';
+                for (int k = hex.length(); k < 4; k++) {
+                    bytes[n++] = '0';
+                }
+                for (int k = 0; k < hex.length(); k++) {
+                    bytes[n++] = (byte) Character.toUpperCase(hex.charAt(k));
+                }
+            }
+        }
+        out.write(bytes, 0, n);
+        out.flush();
+    }
+
     private static void escape(StringBuilder out, String s, boolean key) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

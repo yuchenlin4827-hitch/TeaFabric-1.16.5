@@ -139,6 +139,12 @@ public final class WebFabricLoader implements FabricLoader {
         return result;
     }
 
+    /** Called by the generated Entrypoints when creating an entrypoint object fails (its constructor threw). */
+    public static void entrypointFailed(String modId, String key, Throwable t) {
+        teafabric.web.log.LogSink.log(3, "ERROR", "Fabric", "Entrypoint '" + key + "' of mod '" + modId
+                + "' could not be created; the game continues without it", t);
+    }
+
     @Override
     public <T> void invokeEntrypoints(String key, Class<T> type, Consumer<? super T> invoker) {
         // Unlike Fabric Loader, a failing entrypoint is logged and the others still run: in a browser build a
