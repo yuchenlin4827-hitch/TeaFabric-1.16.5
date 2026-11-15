@@ -525,8 +525,9 @@ public final class Baker implements PreLaunchEntrypoint {
                         // (REI sets its Internals' static fields by name)
                         boolean classArg = call.desc.contains("Ljava/lang/Class;");
                         boolean fromJsonCall = call.name.equals("fromJson") && call.desc.contains("Ljava/lang/Class;)");
-                        boolean configCall = classArg && call.owner.toLowerCase(java.util.Locale.ROOT).contains("config")
-                                && !call.owner.startsWith("java/");
+                        String simple = call.owner.substring(call.owner.lastIndexOf('/') + 1);
+                        boolean configCall = classArg && simple.contains("Config") && !call.owner.startsWith("java/")
+                                && !call.owner.contains("/shadow");
                         boolean fieldLookup = call.owner.equals("java/lang/Class")
                                 && (call.name.equals("getDeclaredField") || call.name.equals("getDeclaredFields"));
                         if (!fromJsonCall && !configCall && !fieldLookup) {
@@ -632,65 +633,99 @@ public final class Baker implements PreLaunchEntrypoint {
         };
         cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER, "teafabric/generated/Reflective",
                 null, "java/lang/Object", null);
+        java.util.List<String> all = new java.util.ArrayList<>(keep);
+        int chunk = 300;
+        int parts = (all.size() + chunk - 1) / chunk;
+        // classes(create): create(i) for each part (instantiating the concrete classes when create is true),
+        // then the array of all the classes
+        for (int part = 0; part < parts; part++) {
+            org.objectweb.asm.MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, "create" + part,
+                    "(Z)V", null, null);
+            mv.visitCode();
+            org.objectweb.asm.Label skip = new org.objectweb.asm.Label();
+            mv.visitVarInsn(Opcodes.ILOAD, 0);
+            mv.visitJumpInsn(Opcodes.IFEQ, skip);
+            for (String c : all.subList(part * chunk, Math.min(all.size(), (part + 1) * chunk))) {
+                byte[] bytes = classes.get(c);
+                if (bytes == null) {
+                    continue;
+                }
+                org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+                new org.objectweb.asm.ClassReader(bytes).accept(node, org.objectweb.asm.ClassReader.SKIP_CODE);
+                if ((node.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_INTERFACE)) != 0) {
+                    continue;
+                }
+                for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+                    if (m.name.equals("<init>") && m.desc.equals("()V")) {
+                        mv.visitTypeInsn(Opcodes.NEW, c);
+                        mv.visitInsn(Opcodes.DUP);
+                        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, c, "<init>", "()V", false);
+                        mv.visitInsn(Opcodes.POP);
+                        break;
+                    }
+                }
+            }
+            mv.visitLabel(skip);
+            mv.visitInsn(Opcodes.RETURN);
+            mv.visitMaxs(0, 0);
+            mv.visitEnd();
+            // lookup<part>(name)
+            org.objectweb.asm.MethodVisitor lk = cw.visitMethod(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, "lookup" + part,
+                    "(Ljava/lang/String;)Ljava/lang/Class;", null, null);
+            lk.visitCode();
+            for (String c : all.subList(part * chunk, Math.min(all.size(), (part + 1) * chunk))) {
+                org.objectweb.asm.Label next = new org.objectweb.asm.Label();
+                lk.visitLdcInsn(c.replace('/', '.'));
+                lk.visitVarInsn(Opcodes.ALOAD, 0);
+                lk.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "equals", "(Ljava/lang/Object;)Z", false);
+                lk.visitJumpInsn(Opcodes.IFEQ, next);
+                // Class.forName runs the static initialiser (Night Config's formats register themselves there);
+                // a class literal does not, reading a static field does.
+                org.objectweb.asm.tree.FieldNode sf = staticField(c);
+                if (sf != null) {
+                    lk.visitFieldInsn(Opcodes.GETSTATIC, c, sf.name, sf.desc);
+                    lk.visitInsn(org.objectweb.asm.Type.getType(sf.desc).getSize() == 2 ? Opcodes.POP2 : Opcodes.POP);
+                }
+                lk.visitLdcInsn(org.objectweb.asm.Type.getObjectType(c));
+                lk.visitInsn(Opcodes.ARETURN);
+                lk.visitLabel(next);
+            }
+            lk.visitInsn(Opcodes.ACONST_NULL);
+            lk.visitInsn(Opcodes.ARETURN);
+            lk.visitMaxs(0, 0);
+            lk.visitEnd();
+        }
         org.objectweb.asm.MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "classes",
                 "(Z)[Ljava/lang/Class;", null, null);
         mv.visitCode();
-        org.objectweb.asm.Label skip = new org.objectweb.asm.Label();
-        mv.visitVarInsn(Opcodes.ILOAD, 0);
-        mv.visitJumpInsn(Opcodes.IFEQ, skip);
-        for (String c : keep) {
-            byte[] bytes = classes.get(c);
-            if (bytes == null) {
-                continue;
-            }
-            org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
-            new org.objectweb.asm.ClassReader(bytes).accept(node, org.objectweb.asm.ClassReader.SKIP_CODE);
-            if ((node.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_INTERFACE)) != 0) {
-                continue;
-            }
-            for (org.objectweb.asm.tree.MethodNode m : node.methods) {
-                if (m.name.equals("<init>") && m.desc.equals("()V")) {
-                    mv.visitTypeInsn(Opcodes.NEW, c);
-                    mv.visitInsn(Opcodes.DUP);
-                    mv.visitMethodInsn(Opcodes.INVOKESPECIAL, c, "<init>", "()V", false);
-                    mv.visitInsn(Opcodes.POP);
-                    break;
-                }
-            }
+        for (int part = 0; part < parts; part++) {
+            mv.visitVarInsn(Opcodes.ILOAD, 0);
+            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "teafabric/generated/Reflective", "create" + part, "(Z)V", false);
         }
-        mv.visitLabel(skip);
-        mv.visitLdcInsn(keep.size());
+        mv.visitLdcInsn(all.size());
         mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Class");
-        int i = 0;
-        for (String c : keep) {
+        for (int i = 0; i < all.size(); i++) {
             mv.visitInsn(Opcodes.DUP);
-            mv.visitLdcInsn(i++);
-            mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(c));
+            mv.visitLdcInsn(i);
+            mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(all.get(i)));
             mv.visitInsn(Opcodes.AASTORE);
         }
         mv.visitInsn(Opcodes.ARETURN);
         mv.visitMaxs(0, 0);
         mv.visitEnd();
-        // lookup(name): the class with that name among them, or null (Class.forName is redirected here first)
         org.objectweb.asm.MethodVisitor lk = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "lookup",
                 "(Ljava/lang/String;)Ljava/lang/Class;", null, null);
         lk.visitCode();
-        for (String c : keep) {
+        for (int part = 0; part < parts; part++) {
             org.objectweb.asm.Label next = new org.objectweb.asm.Label();
-            lk.visitLdcInsn(c.replace('/', '.'));
             lk.visitVarInsn(Opcodes.ALOAD, 0);
-            lk.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "equals", "(Ljava/lang/Object;)Z", false);
-            lk.visitJumpInsn(Opcodes.IFEQ, next);
-            // Class.forName runs the static initialiser (Night Config's formats register themselves there);
-            // a class literal does not, reading a static field does.
-            org.objectweb.asm.tree.FieldNode sf = staticField(c);
-            if (sf != null) {
-                lk.visitFieldInsn(Opcodes.GETSTATIC, c, sf.name, sf.desc);
-                lk.visitInsn(org.objectweb.asm.Type.getType(sf.desc).getSize() == 2 ? Opcodes.POP2 : Opcodes.POP);
-            }
-            lk.visitLdcInsn(org.objectweb.asm.Type.getObjectType(c));
+            lk.visitMethodInsn(Opcodes.INVOKESTATIC, "teafabric/generated/Reflective", "lookup" + part,
+                    "(Ljava/lang/String;)Ljava/lang/Class;", false);
+            lk.visitInsn(Opcodes.DUP);
+            lk.visitJumpInsn(Opcodes.IFNULL, next);
             lk.visitInsn(Opcodes.ARETURN);
             lk.visitLabel(next);
+            lk.visitInsn(Opcodes.POP);
         }
         lk.visitInsn(Opcodes.ACONST_NULL);
         lk.visitInsn(Opcodes.ARETURN);
