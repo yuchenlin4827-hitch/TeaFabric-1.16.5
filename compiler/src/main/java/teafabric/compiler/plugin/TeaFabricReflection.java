@@ -35,6 +35,8 @@ public class TeaFabricReflection implements ReflectionSupplier {
 
     /** Classes the baker found named in mod metadata (META-INF/teafabric/reflective-classes.txt). */
     private java.util.Set<String> named;
+    /** Config data classes ("data " lines): fields and constructors are reflective. */
+    private final java.util.Set<String> data = new java.util.HashSet<>();
 
     private java.util.Set<String> named(ReflectionContext context) {
         if (named == null) {
@@ -44,8 +46,13 @@ public class TeaFabricReflection implements ReflectionSupplier {
                 if (in != null) {
                     for (String line : new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
                             .split("\n")) {
-                        if (!line.trim().isEmpty()) {
-                            named.add(line.trim());
+                        String l = line.trim();
+                        if (l.startsWith("data ")) {
+                            l = l.substring(5);
+                            data.add(l);
+                        }
+                        if (!l.isEmpty()) {
+                            named.add(l);
                         }
                     }
                 }
@@ -59,6 +66,22 @@ public class TeaFabricReflection implements ReflectionSupplier {
     @Override
     public boolean isClassFoundByName(ReflectionContext context, String name) {
         return findable(name) || named(context).contains(name);
+    }
+
+    @Override
+    public Collection<String> getAccessibleFields(ReflectionContext context, String className) {
+        named(context);
+        if (!data.contains(className)) {
+            return Collections.emptyList();
+        }
+        ClassReader cls = context.getClassSource().get(className);
+        Collection<String> fields = new ArrayList<>();
+        if (cls != null) {
+            for (org.teavm.model.FieldReader f : cls.getFields()) {
+                fields.add(f.getName());
+            }
+        }
+        return fields;
     }
 
     @Override

@@ -451,15 +451,114 @@ public final class Baker implements PreLaunchEntrypoint {
      */
     private void writeReflectiveClasses() {
         StringBuilder list = new StringBuilder();
+        StringBuilder shown = new StringBuilder();
         for (String s : CUSTOM_STRINGS) {
             String internal = s.replace('.', '/');
             if (s.indexOf('.') > 0 && s.indexOf(' ') < 0 && classes.containsKey(internal)) {
                 list.append(s).append('\n');
+                shown.append(' ').append(s);
             }
         }
+        java.util.Set<String> data = dataClasses();
+        for (String d : data) {
+            list.append("data ").append(d.replace('/', '.')).append('\n');
+        }
         resources.put("META-INF/teafabric/reflective-classes.txt", list.toString().getBytes(StandardCharsets.UTF_8));
-        System.out.println("[baker] Classes named in mod metadata, findable by name: "
-                + list.toString().replace('\n', ' ').trim());
+        System.out.println("[baker] Classes named in mod metadata, findable by name:" + shown);
+        System.out.println("[baker] Config data classes with reflective fields and constructors: " + data.size());
+    }
+
+    /**
+     * Classes that config libraries fill by reflection: AutoConfig's ConfigData implementations and classes
+     * passed as a class literal to a fromJson method (Gson, Jankson), with the classes of their fields
+     * (generic arguments included) and their superclasses, as far as they belong to mods.
+     */
+    private java.util.Set<String> dataClasses() {
+        java.util.Set<String> roots = new java.util.TreeSet<>();
+        byte[] configData = "ConfigData".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] fromJson = "fromJson".getBytes(StandardCharsets.ISO_8859_1);
+        for (Map.Entry<String, byte[]> e : classes.entrySet()) {
+            byte[] b = e.getValue();
+            boolean cd = contains(b, configData);
+            boolean fj = contains(b, fromJson);
+            if (!cd && !fj) {
+                continue;
+            }
+            org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+            new org.objectweb.asm.ClassReader(b).accept(node, 0);
+            if (cd) {
+                for (String i : node.interfaces) {
+                    if (i.endsWith("/autoconfig/ConfigData") || i.endsWith("/autoconfig1u/ConfigData")) {
+                        roots.add(node.name);
+                    }
+                }
+            }
+            if (fj) {
+                for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+                    for (org.objectweb.asm.tree.AbstractInsnNode insn = m.instructions.getFirst(); insn != null;
+                            insn = insn.getNext()) {
+                        if (!(insn instanceof org.objectweb.asm.tree.MethodInsnNode)
+                                || !((org.objectweb.asm.tree.MethodInsnNode) insn).name.equals("fromJson")
+                                || !((org.objectweb.asm.tree.MethodInsnNode) insn).desc.contains("Ljava/lang/Class;)")) {
+                            continue;
+                        }
+                        org.objectweb.asm.tree.AbstractInsnNode p = insn.getPrevious();
+                        while (p != null && p.getOpcode() < 0) {
+                            p = p.getPrevious();
+                        }
+                        if (p instanceof org.objectweb.asm.tree.LdcInsnNode
+                                && ((org.objectweb.asm.tree.LdcInsnNode) p).cst instanceof org.objectweb.asm.Type) {
+                            org.objectweb.asm.Type t = (org.objectweb.asm.Type) ((org.objectweb.asm.tree.LdcInsnNode) p).cst;
+                            if (t.getSort() == org.objectweb.asm.Type.OBJECT) {
+                                roots.add(t.getInternalName());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>(roots);
+        while (!queue.isEmpty()) {
+            String c = queue.poll();
+            if (!isModClass(c) || !out.add(c)) {
+                continue;
+            }
+            org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+            new org.objectweb.asm.ClassReader(classes.get(c)).accept(node, org.objectweb.asm.ClassReader.SKIP_CODE);
+            if (node.superName != null) {
+                queue.add(node.superName);
+            }
+            for (org.objectweb.asm.tree.FieldNode f : node.fields) {
+                if ((f.access & Opcodes.ACC_STATIC) != 0) {
+                    continue;
+                }
+                String sig = f.signature != null ? f.signature : f.desc;
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("L([\\w/$]+)[;<]").matcher(sig);
+                while (m.find()) {
+                    queue.add(m.group(1));
+                }
+            }
+        }
+        return out;
+    }
+
+    private boolean isModClass(String c) {
+        return classes.containsKey(c) && !c.startsWith("java/") && !c.startsWith("net/minecraft/")
+                && !c.startsWith("com/mojang/") && !c.startsWith("com/google/") && !c.startsWith("it/unimi/");
+    }
+
+    private static boolean contains(byte[] bytes, byte[] part) {
+        outer:
+        for (int i = 0, n = bytes.length - part.length; i <= n; i++) {
+            for (int j = 0; j < part.length; j++) {
+                if (bytes[i + j] != part[j]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     private static void customValue(StringBuilder sb, CustomValue v) {
