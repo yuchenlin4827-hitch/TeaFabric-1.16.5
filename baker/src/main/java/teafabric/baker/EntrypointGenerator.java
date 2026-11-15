@@ -52,6 +52,9 @@ final class EntrypointGenerator implements Opcodes {
         for (ModContainerImpl mod : mods) {
             keys.addAll(mod.getMetadata().getEntrypointKeys());
         }
+        // Manningham Mills' early risers transform classes while the game launches; here that happened at build
+        // time (they ran in the baker), so they are not compiled in.
+        keys.remove("mm:early_risers");
         int count = 0;
         for (String key : keys) {
             Label next = new Label();
