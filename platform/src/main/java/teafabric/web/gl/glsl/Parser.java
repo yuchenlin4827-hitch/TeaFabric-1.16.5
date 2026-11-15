@@ -73,8 +73,27 @@ final class Parser {
                 || t.text.equals("struct"));
     }
 
-    private boolean isQualifier(Tok t) {
-        return t.kind == Lexer.IDENT && (QUALIFIERS.contains(t.text) || t.text.equals("layout"));
+    /** Qualifier words that older GLSL versions allow as identifiers (a variable named "sample" is common). */
+    private static final Set<String> SOFT = new HashSet<>(java.util.Arrays.asList("sample", "patch", "buffer",
+            "shared", "precise", "coherent", "volatile", "restrict", "readonly", "writeonly", "flat", "smooth",
+            "noperspective"));
+
+    private boolean isQualifierAt(int k) {
+        Tok t = peek(k);
+        if (t.kind != Lexer.IDENT) {
+            return false;
+        }
+        if (t.text.equals("layout")) {
+            return peek(k + 1).is("(");
+        }
+        if (!QUALIFIERS.contains(t.text)) {
+            return false;
+        }
+        if (!SOFT.contains(t.text)) {
+            return true;
+        }
+        Tok n = peek(k + 1);
+        return n.kind == Lexer.IDENT && (isTypeName(n) || isQualifierAt(k + 1));
     }
 
     // ------------------------------------------------------------------ top level
@@ -185,7 +204,7 @@ final class Parser {
 
     private Qualifiers qualifiers() {
         Qualifiers q = new Qualifiers();
-        while (isQualifier(peek())) {
+        while (isQualifierAt(0)) {
             if (at("layout")) {
                 next();
                 expect("(");
@@ -307,7 +326,7 @@ final class Parser {
 
     private boolean startsDeclaration() {
         Tok t = peek();
-        if (isQualifier(t) || t.is("struct")) {
+        if (isQualifierAt(0) || t.is("struct")) {
             return true;
         }
         if (!isTypeName(t)) {
