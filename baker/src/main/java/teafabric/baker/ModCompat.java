@@ -41,6 +41,29 @@ final class ModCompat {
         mainHooks(classes);
         ArchitecturyEvents.apply(classes);
         amecs(classes);
+        shulkerBoxTooltip(classes);
+    }
+
+    /**
+     * ShulkerBoxTooltip validates its config after loading by creating the validator classes named in field
+     * annotations reflectively, which fails here; the validators only clamp values a player typed, so the
+     * validation is skipped.
+     */
+    private static void shulkerBoxTooltip(Map<String, byte[]> classes) {
+        String config = "com/misterpemodder/shulkerboxtooltip/impl/config/Configuration";
+        if (!classes.containsKey(config)) {
+            return;
+        }
+        patch(classes, config, node -> {
+            MethodNode m = method(node, "validatePostLoad", "()V");
+            if (m == null) {
+                return false;
+            }
+            InsnList code = new InsnList();
+            code.add(new InsnNode(Opcodes.RETURN));
+            replace(m, code);
+            return true;
+        });
     }
 
     /**

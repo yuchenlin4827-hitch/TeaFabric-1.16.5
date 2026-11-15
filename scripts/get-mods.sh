@@ -5,7 +5,9 @@
 #    already includes it), FerriteCore 2.1.0 (2.1.1 is used) and Hydrogen (optional in the pack, which turns it off
 #    on Java 16 and later; it generates classes at run time);
 #  - FerriteCore 2.1.1;
-#  - UI and helper mods: REI, AppleSkin, WTHIT, Mouse Wheelie, BetterF3, Light Overlay, ShulkerBoxTooltip.
+#  - UI and helper mods: REI, AppleSkin, WTHIT, Mouse Wheelie, BetterF3, ShulkerBoxTooltip.
+# Light Overlay is left out: it calls its own Fabric code through MethodHandles looked up by names built at
+# run time, which a compiled build cannot provide.
 # Map mods (Xaero's, JourneyMap) are left out: their licences forbid redistributing modified copies, which a
 # compiled build is.
 #
@@ -26,7 +28,6 @@ EXTRA = [  # slug, version number (exact, so builds are reproducible)
     ('wthit', 'fabric-2.10.2'),
     ('mouse-wheelie', '1.13.0+mc1.16.5'),
     ('betterf3', '1.5.0'),
-    ('light-overlay', '5.8.1'),
     ('shulkerboxtooltip', '2.3.9+1.16.5'),
 ]
 

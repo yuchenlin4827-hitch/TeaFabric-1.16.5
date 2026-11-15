@@ -364,4 +364,18 @@ public final class LangCompat {
             }
         }
     }
+
+    /**
+     * Class.forName: first the classes the baker found that mods load by name (WTHIT's plugins, REI's modules,
+     * Night Config's formats, config validators), then TeaVM's own table.
+     */
+    public static Class<?> forName(String name) throws ClassNotFoundException {
+        Class<?> c = teafabric.generated.Reflective.lookup(name);
+        return c != null ? c : Class.forName(name);
+    }
+
+    public static Class<?> forName(String name, boolean initialize, ClassLoader loader) throws ClassNotFoundException {
+        Class<?> c = teafabric.generated.Reflective.lookup(name);
+        return c != null ? c : Class.forName(name, initialize, loader);
+    }
 }

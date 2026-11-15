@@ -650,6 +650,24 @@ public final class Baker implements PreLaunchEntrypoint {
         mv.visitInsn(Opcodes.ARETURN);
         mv.visitMaxs(0, 0);
         mv.visitEnd();
+        // lookup(name): the class with that name among them, or null (Class.forName is redirected here first)
+        org.objectweb.asm.MethodVisitor lk = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "lookup",
+                "(Ljava/lang/String;)Ljava/lang/Class;", null, null);
+        lk.visitCode();
+        for (String c : keep) {
+            org.objectweb.asm.Label next = new org.objectweb.asm.Label();
+            lk.visitLdcInsn(c.replace('/', '.'));
+            lk.visitVarInsn(Opcodes.ALOAD, 0);
+            lk.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "equals", "(Ljava/lang/Object;)Z", false);
+            lk.visitJumpInsn(Opcodes.IFEQ, next);
+            lk.visitLdcInsn(org.objectweb.asm.Type.getObjectType(c));
+            lk.visitInsn(Opcodes.ARETURN);
+            lk.visitLabel(next);
+        }
+        lk.visitInsn(Opcodes.ACONST_NULL);
+        lk.visitInsn(Opcodes.ARETURN);
+        lk.visitMaxs(0, 0);
+        lk.visitEnd();
         cw.visitEnd();
         return cw.toByteArray();
     }
@@ -665,6 +683,7 @@ public final class Baker implements PreLaunchEntrypoint {
         for (Map.Entry<String, byte[]> e : classes.entrySet()) {
             String n = e.getKey();
             if (n.startsWith("net/minecraft/") || n.startsWith("com/mojang/") || n.startsWith("java/")
+                    || n.startsWith("net/fabricmc/loader/") || n.startsWith("kotlinx/")
                     || n.startsWith("groovy") || n.startsWith("org/codehaus/") || n.startsWith("kotlin/")
                     || n.startsWith("org/apache/") || n.startsWith("io/netty/") || n.startsWith("com/google/")) {
                 continue;
@@ -698,7 +717,8 @@ public final class Baker implements PreLaunchEntrypoint {
             for (String s : strings) {
                 String internal = s.replace('.', '/');
                 if (s.indexOf('.') > 0 && s.indexOf(' ') < 0 && s.indexOf('/') < 0 && classes.containsKey(internal)
-                        && !internal.startsWith("net/minecraft/")) {
+                        && !internal.startsWith("net/minecraft/") && !internal.startsWith("net/fabricmc/loader/")
+                        && !internal.startsWith("kotlin")) {
                     out.add(internal);
                 }
             }
