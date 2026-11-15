@@ -111,8 +111,10 @@ final class ArchitecturyEvents {
                         continue;
                     }
                     // the Class / array argument stays on the stack; the factory ignores it
-                    m.instructions.set(call, new MethodInsnNode(Opcodes.INVOKESTATIC, invoker, "event",
-                            call.desc, false));
+                    MethodInsnNode direct = new MethodInsnNode(Opcodes.INVOKESTATIC, invoker, "event", call.desc,
+                            false);
+                    m.instructions.set(call, direct);
+                    insn = direct; // continue after the replacement (the removed node has no successor)
                     here++;
                 }
             }

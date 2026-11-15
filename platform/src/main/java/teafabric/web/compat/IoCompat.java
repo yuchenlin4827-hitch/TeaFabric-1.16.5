@@ -47,7 +47,8 @@ public final class IoCompat {
     }
 
     public static Path toPath(File file) {
-        return Paths.get(file.getPath());
+        // absolute: relative files are relative to the game directory (the working directory of a desktop launch)
+        return Paths.get(file.getAbsolutePath());
     }
 
     public static FileChannel getChannel(RandomAccessFile raf) {

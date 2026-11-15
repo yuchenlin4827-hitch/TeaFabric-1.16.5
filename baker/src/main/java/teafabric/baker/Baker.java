@@ -119,6 +119,7 @@ public final class Baker implements PreLaunchEntrypoint {
         resources.put("teafabric/mods.json", json.toString().getBytes(StandardCharsets.UTF_8));
 
         ModCompat.apply(classes, resources);
+        writeReflectiveClasses();
         generateSyntheticClasses();
         collectMixinExtrasClasses();
         classes.put(EntrypointGenerator.CLASS_NAME, new EntrypointGenerator(classes).generate(entrypoints));
@@ -440,6 +441,27 @@ public final class Baker implements PreLaunchEntrypoint {
         sb.append("}}");
     }
 
+    /** Every string in the mods' custom metadata (some name classes that a mod instantiates by name). */
+    private static final java.util.Set<String> CUSTOM_STRINGS = new java.util.TreeSet<>();
+
+    /**
+     * Classes named in custom metadata (WTHIT's "waila:plugins" initializers, for instance) are created with
+     * Class.forName(name).getConstructor().newInstance(); the compiler keeps them findable by name with their
+     * constructors (TeaFabricReflection reads this list).
+     */
+    private void writeReflectiveClasses() {
+        StringBuilder list = new StringBuilder();
+        for (String s : CUSTOM_STRINGS) {
+            String internal = s.replace('.', '/');
+            if (s.indexOf('.') > 0 && s.indexOf(' ') < 0 && classes.containsKey(internal)) {
+                list.append(s).append('\n');
+            }
+        }
+        resources.put("META-INF/teafabric/reflective-classes.txt", list.toString().getBytes(StandardCharsets.UTF_8));
+        System.out.println("[baker] Classes named in mod metadata, findable by name: "
+                + list.toString().replace('\n', ' ').trim());
+    }
+
     private static void customValue(StringBuilder sb, CustomValue v) {
         switch (v.getType()) {
             case OBJECT: {
@@ -471,6 +493,7 @@ public final class Baker implements PreLaunchEntrypoint {
             }
             case STRING:
                 sb.append(str(v.getAsString()));
+                CUSTOM_STRINGS.add(v.getAsString());
                 break;
             case NUMBER:
                 sb.append(v.getAsNumber());
