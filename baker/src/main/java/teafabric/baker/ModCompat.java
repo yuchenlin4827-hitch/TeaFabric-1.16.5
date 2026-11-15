@@ -43,6 +43,75 @@ final class ModCompat {
         amecs(classes);
         shulkerBoxTooltip(classes);
         nightConfig(classes);
+        extendedEnums(classes);
+    }
+
+    /**
+     * Enums that a mixin extends with more constants at run time (Iris adds a geometry shader type and vertex
+     * attributes to Sodium's enums: it creates instances through the constructor and appends them to the values
+     * array). TeaVM takes an enum's constants (for EnumMap, EnumSet, getEnumConstants) from its enum fields at
+     * compile time, so an EnumMap of Sodium's vertex attributes was too small and creating a world failed. Each
+     * added constant is also stored in a new enum field, in the order of their ordinals.
+     */
+    private static void extendedEnums(Map<String, byte[]> classes) {
+        for (String name : new java.util.ArrayList<>(classes.keySet())) {
+            ClassNode probe = new ClassNode();
+            new ClassReader(classes.get(name)).accept(probe, ClassReader.SKIP_CODE);
+            if ((probe.access & Opcodes.ACC_ENUM) == 0) {
+                continue;
+            }
+            String values = null;
+            for (FieldNode f : probe.fields) {
+                if ((f.access & Opcodes.ACC_STATIC) != 0 && (f.access & Opcodes.ACC_SYNTHETIC) != 0
+                        && f.desc.equals("[L" + name + ";")) {
+                    values = f.name;
+                }
+            }
+            if (values == null) {
+                continue;
+            }
+            String valuesField = values;
+            ClassNode full = new ClassNode();
+            new ClassReader(classes.get(name)).accept(full, 0);
+            MethodNode clinit = method(full, "<clinit>", "()V");
+            if (clinit == null) {
+                continue;
+            }
+            int puts = 0;
+            for (AbstractInsnNode insn = clinit.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn.getOpcode() == Opcodes.PUTSTATIC && ((FieldInsnNode) insn).owner.equals(name)
+                        && ((FieldInsnNode) insn).name.equals(valuesField)) {
+                    puts++;
+                }
+            }
+            if (puts < 2) {
+                continue;
+            }
+            patch(classes, name, node -> {
+                MethodNode m = method(node, "<clinit>", "()V");
+                int added = 0;
+                for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (insn.getOpcode() != Opcodes.PUTSTATIC) {
+                        continue;
+                    }
+                    FieldInsnNode put = (FieldInsnNode) insn;
+                    if (put.owner.equals(name) || !put.desc.equals("L" + name + ";")) {
+                        continue;
+                    }
+                    String field = "teafabric$" + put.name;
+                    node.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL
+                            | Opcodes.ACC_ENUM, field, put.desc, null, null));
+                    InsnList copy = new InsnList();
+                    copy.add(new InsnNode(Opcodes.DUP));
+                    copy.add(new FieldInsnNode(Opcodes.PUTSTATIC, name, field, put.desc));
+                    m.instructions.insertBefore(put, copy);
+                    System.out.println("[baker] Enum " + name + ": constant " + put.owner + "." + put.name
+                            + " added by a mixin is an enum field");
+                    added++;
+                }
+                return added > 0;
+            });
+        }
     }
 
     /**
