@@ -38,6 +38,74 @@ final class ModCompat {
         architecturyPlatformMethods(classes);
         notEnoughCrashes(classes);
         lightOverlay(classes);
+        mainHooks(classes);
+    }
+
+    static final String MAIN_HOOKS = "teafabric/generated/MainHooks";
+
+    /**
+     * The browser build starts the client from WebLauncher, not from Minecraft's Main.main, so mixins injected
+     * at the head of Main.main never ran. Not Enough Crashes installs its platform layer there (without it the
+     * game stops with a NullPointerException), Smooth Boot reads its config there. The handler calls at the
+     * head of main are collected into the generated {@code MainHooks.run(String[])}, which WebLauncher calls
+     * first; the handlers become public so it can. Always generated, empty when no mod injects there.
+     */
+    private static void mainHooks(Map<String, byte[]> classes) {
+        String main = "net/minecraft/client/main/Main";
+        java.util.List<MethodInsnNode> calls = new java.util.ArrayList<>();
+        if (classes.containsKey(main)) {
+            ClassNode node = new ClassNode();
+            new ClassReader(classes.get(main)).accept(node, 0);
+            MethodNode m = method(node, "main", "([Ljava/lang/String;)V");
+            java.util.Set<String> handlers = new java.util.HashSet<>();
+            if (m != null) {
+                for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    int op = insn.getOpcode();
+                    if (op < 0 || op == Opcodes.ALOAD || op == Opcodes.ACONST_NULL) {
+                        continue;
+                    }
+                    if (op == Opcodes.INVOKESTATIC && ((MethodInsnNode) insn).owner.equals(main)
+                            && ((MethodInsnNode) insn).name.startsWith("handler$")) {
+                        calls.add((MethodInsnNode) insn);
+                        handlers.add(((MethodInsnNode) insn).name + ((MethodInsnNode) insn).desc);
+                        continue;
+                    }
+                    break; // the original code of main starts here
+                }
+            }
+            if (!handlers.isEmpty()) {
+                for (MethodNode h : node.methods) {
+                    if (handlers.contains(h.name + h.desc)) {
+                        h.access = (h.access & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
+                    }
+                }
+                ClassWriter w = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+                node.accept(w);
+                classes.put(main, w.toByteArray());
+            }
+        }
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER, MAIN_HOOKS, null,
+                "java/lang/Object", null);
+        org.objectweb.asm.MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "run",
+                "([Ljava/lang/String;)V", null, null);
+        mv.visitCode();
+        for (MethodInsnNode call : calls) {
+            for (org.objectweb.asm.Type t : org.objectweb.asm.Type.getArgumentTypes(call.desc)) {
+                if (t.getDescriptor().equals("[Ljava/lang/String;")) {
+                    mv.visitVarInsn(Opcodes.ALOAD, 0);
+                } else {
+                    mv.visitInsn(Opcodes.ACONST_NULL); // the CallbackInfo, which these injections do not use
+                }
+            }
+            mv.visitMethodInsn(Opcodes.INVOKESTATIC, call.owner, call.name, call.desc, false);
+        }
+        mv.visitInsn(Opcodes.RETURN);
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
+        cw.visitEnd();
+        classes.put(MAIN_HOOKS, cw.toByteArray());
+        System.out.println("[baker] Generated " + MAIN_HOOKS + " with " + calls.size() + " Main.main injection(s)");
     }
 
     /**
