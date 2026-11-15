@@ -46,9 +46,6 @@ public final class WebMain {
                 new java.io.File(teafabric.web.vfs.WebFileSystem.GAME_DIR).mkdirs();
                 ((org.teavm.runtime.fs.memory.InMemoryVirtualFileSystem) vfs)
                         .setUserDir(teafabric.web.vfs.WebFileSystem.GAME_DIR);
-                // ... including java.nio.file paths (Paths.get("config/x.toml"))
-                org.teavm.runtime.fs.VirtualFileSystemProvider.setInstance(
-                        new teafabric.web.vfs.WorkingDirFileSystem(vfs));
             }
             System.setProperty("io.netty.allocator.type", "unpooled");
             System.setProperty("io.netty.noPreferDirect", "true");

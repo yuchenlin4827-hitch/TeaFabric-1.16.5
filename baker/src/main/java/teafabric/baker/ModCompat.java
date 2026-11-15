@@ -54,6 +54,39 @@ final class ModCompat {
         String suffix = "/core/file/FormatDetector";
         String[][] formats = {{"toml/TomlFormat", "toml"}, {"json/JsonFormat", "json"}, {"hocon/HoconFormat", "conf"},
                 {"yaml/YamlFormat", "yaml"}};
+        // Its file watcher (configs that reload when the file changes) needs a WatchService: nothing is watched,
+        // and its polling thread is not started.
+        for (String watcher : new java.util.ArrayList<>(classes.keySet())) {
+            if (!watcher.endsWith("/core/file/FileWatcher") || !watcher.contains("nightconfig")) {
+                continue;
+            }
+            patch(classes, watcher, node -> {
+                boolean changed = false;
+                for (MethodNode m : node.methods) {
+                    if ((m.name.equals("addWatch") || m.name.equals("setWatch"))
+                            && m.desc.equals("(Ljava/nio/file/Path;Ljava/lang/Runnable;)V")) {
+                        InsnList code = new InsnList();
+                        code.add(new InsnNode(Opcodes.RETURN));
+                        replace(m, code);
+                        changed = true;
+                    } else if (m.name.equals("<init>")) {
+                        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                            if (insn instanceof MethodInsnNode && ((MethodInsnNode) insn).owner.equals("java/lang/Thread")
+                                    && ((MethodInsnNode) insn).name.equals("start")) {
+                                InsnNode pop = new InsnNode(Opcodes.POP);
+                                m.instructions.set(insn, pop);
+                                insn = pop;
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+                if (changed) {
+                    System.out.println("[baker] Night Config: " + watcher + " watches nothing");
+                }
+                return changed;
+            });
+        }
         for (String detector : new java.util.ArrayList<>(classes.keySet())) {
             if (!detector.endsWith(suffix) || !detector.contains("nightconfig")) {
                 continue;
