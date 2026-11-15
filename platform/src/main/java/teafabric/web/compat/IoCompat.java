@@ -295,4 +295,9 @@ public final class IoCompat {
             }
         }
     }
+
+    /** Zip archives as file systems (Iris's zipped shader packs): see {@link teafabric.web.vfs.ZipFolderFileSystem}. */
+    public static java.nio.file.FileSystem newFileSystem(Path path, ClassLoader loader) throws IOException {
+        return teafabric.web.vfs.ZipFolderFileSystem.open(path);
+    }
 }

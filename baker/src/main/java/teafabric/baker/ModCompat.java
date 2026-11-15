@@ -37,6 +37,35 @@ final class ModCompat {
         slightGuiModifications(classes);
         architecturyPlatformMethods(classes);
         notEnoughCrashes(classes);
+        lightOverlay(classes);
+    }
+
+    /**
+     * Light Overlay calls its Fabric implementation of the frustum test through a MethodHandle looked up by
+     * name at run time; the call becomes a direct one.
+     */
+    private static void lightOverlay(Map<String, byte[]> classes) {
+        String overlay = "me/shedaniel/lightoverlay/common/fabric/LightOverlay";
+        String impl = "me/shedaniel/lightoverlay/fabric/LightOverlayImpl";
+        if (!classes.containsKey(overlay) || !classes.containsKey(impl)) {
+            return;
+        }
+        String desc = "(Lnet/minecraft/class_4604;DDDDDD)Z";
+        patch(classes, overlay, node -> {
+            MethodNode m = method(node, "isFrustumVisible", desc);
+            if (m == null) {
+                return false;
+            }
+            InsnList code = new InsnList();
+            code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            for (int i = 0; i < 6; i++) {
+                code.add(new VarInsnNode(Opcodes.DLOAD, 1 + 2 * i));
+            }
+            code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, impl, "isFrustumVisible", desc, false));
+            code.add(new InsnNode(Opcodes.IRETURN));
+            replace(m, code);
+            return true;
+        });
     }
 
     /**
