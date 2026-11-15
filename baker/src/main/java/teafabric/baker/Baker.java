@@ -781,6 +781,7 @@ public final class Baker implements PreLaunchEntrypoint {
             String n = e.getKey();
             if (n.startsWith("net/minecraft/") || n.startsWith("com/mojang/") || n.startsWith("java/")
                     || n.startsWith("net/fabricmc/loader/") || n.startsWith("kotlinx/")
+                    || n.startsWith("com/chocohead/") // Manningham Mills (early risers: class transformers at launch)
                     || n.startsWith("groovy") || n.startsWith("org/codehaus/") || n.startsWith("kotlin/")
                     || n.startsWith("org/apache/") || n.startsWith("io/netty/") || n.startsWith("com/google/")) {
                 continue;
@@ -815,7 +816,7 @@ public final class Baker implements PreLaunchEntrypoint {
                 String internal = s.replace('.', '/');
                 if (s.indexOf('.') > 0 && s.indexOf(' ') < 0 && s.indexOf('/') < 0 && classes.containsKey(internal)
                         && !internal.startsWith("net/minecraft/") && !internal.startsWith("net/fabricmc/loader/")
-                        && !internal.startsWith("kotlin")) {
+                        && !internal.startsWith("kotlin") && !internal.contains("/asm/")) {
                     out.add(internal);
                 }
             }
