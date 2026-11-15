@@ -1,5 +1,6 @@
 # Call-site redirects applied by the TeaVM plugin (compiler/.../RedirectTransformer).
 # owner                  method               descriptor                                   -> target
+*java.util.Collection    parallelStream       ()Ljava/util/stream/Stream;                   -> teafabric.web.compat.LangCompat
 java.lang.Class          forName              (Ljava/lang/String;)Ljava/lang/Class;         -> teafabric.web.compat.LangCompat
 java.lang.Class          forName              (Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class; -> teafabric.web.compat.LangCompat
 java.util.Properties     store                (Ljava/io/OutputStream;Ljava/lang/String;)V   -> teafabric.web.compat.LangCompat

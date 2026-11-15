@@ -833,9 +833,21 @@ public final class Baker implements PreLaunchEntrypoint {
         return b.toString();
     }
 
+    private static final String[] NOT_MOD = {"java/", "net/minecraft/", "com/mojang/", "com/google/", "it/unimi/",
+        "net/fabricmc/loader/", "com/llamalad7/", "groovy", "org/codehaus/", "org/objectweb/", "org/spongepowered/",
+        "kotlin", "org/apache/", "io/netty/", "com/viaversion/viaversion/bukkit/", "com/viaversion/viaversion/velocity/",
+        "com/viaversion/viaversion/bungee/", "com/viaversion/viaversion/sponge/"};
+
     private boolean isModClass(String c) {
-        return classes.containsKey(c) && !c.startsWith("java/") && !c.startsWith("net/minecraft/")
-                && !c.startsWith("com/mojang/") && !c.startsWith("com/google/") && !c.startsWith("it/unimi/");
+        if (!classes.containsKey(c)) {
+            return false;
+        }
+        for (String p : NOT_MOD) {
+            if (c.startsWith(p)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean contains(byte[] bytes, byte[] part) {

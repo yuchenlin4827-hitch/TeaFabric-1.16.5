@@ -378,4 +378,9 @@ public final class LangCompat {
         Class<?> c = teafabric.generated.Reflective.lookup(name);
         return c != null ? c : Class.forName(name, initialize, loader);
     }
+
+    /** parallelStream: one thread here, so the sequential stream (REI filters its entry list this way). */
+    public static <T> java.util.stream.Stream<T> parallelStream(java.util.Collection<T> c) {
+        return c.stream();
+    }
 }
