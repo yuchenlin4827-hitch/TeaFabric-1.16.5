@@ -407,6 +407,48 @@ shadow map and adds a dozen full-screen passes per frame, on a page that already
 frame in Minecraft's own code. The WebGPU renderer (`?webgpu`, see Status) brings compute shaders and image
 load/store, which some packs need; the translation of compatibility-profile GLSL is still missing either way.
 
+### Fabulously Optimized and UI/helper mods
+
+`scripts/get-mods.sh` puts the mods of Fabulously Optimized 1.12.3 (its last pack for 1.16.5) and a set of
+UI and helper mods into `./mods` (list in `mods/README.md`). What they needed, besides what the
+optimization mods above needed (all in `ModCompat`, `ArchitecturyEvents`, the class library and the compiler
+plugin, applied only when the mod is present):
+
+* **Architectury** (used by Cloth Config, BetterF3, Not Enough Crashes, REI): its
+  `@ExpectPlatform` methods are invokedynamic calls with a bootstrap method that finds the Fabric
+  implementation by name; they become direct calls. Its events build their invokers with
+  `java.lang.reflect.Proxy` and call listeners through `MethodHandles`; for each of the 81 event interfaces
+  the mods use, the baker generates the invoker class instead (same rules: a PASS result continues, any
+  other result is returned), and the 100 call sites use it.
+* **Not Enough Crashes** installs its platform layer and Smooth Boot reads its config from mixins injected
+  at the head of Minecraft's `Main.main`, which the browser build does not go through: the injections are
+  collected into a generated `MainHooks` that the launcher runs first. Its start-up downloads Yarn
+  mappings, rewrites log events and installs a SecurityManager; those are skipped.
+* **Configs** (AutoConfig, Gson, Jankson): the classes they fill by reflection (ConfigData implementations,
+  classes passed to `fromJson`, and the classes of their fields) keep reflective fields and constructors
+  (128 classes). TeaVM 0.16 could not generate reflection data for a field with annotations but no generic
+  signature (AutoConfig's fields); the compiler plugin gives such fields their plain type. Annotation values
+  (`@Config(name = ...)`) were broken by the plugin's own JNI stubbing, which now leaves TeaVM's generated
+  annotation classes alone.
+* **Classes loaded by name**: WTHIT creates its plugins from class names in `fabric.mod.json` and REI loads its
+  modules with `Class.forName("...")`. The baker collects such names (custom metadata, string constants of
+  classes that call `Class.forName`) into a generated lookup that `Class.forName` consults first, and keeps
+  those classes and their constructors in the build. Night Config (in LambDynamicLights and LambdaBetterGrass)
+  loads its file formats that way only to run their static initialisers, which register the file extension;
+  its format detector registers them directly instead.
+* Relative paths are relative to the game directory (`user.dir` and the file system's working directory),
+  as with a desktop launcher (Entity Culling, Smooth Boot write `config/` that way).
+* Smaller ones: amecs' key binding map (in Mouse Wheelie; reflection on a mixin-added method) is a direct
+  call; ShulkerBoxTooltip skips the validation of its config file (validators created by reflection); Dynamic FPS reads page focus and
+  visibility through `glfwGetWindowAttrib`; Borderless Mining's undecorated window is the browser's full
+  screen; WTHIT gets `java.awt.Rectangle`/`Dimension`, Mouse Wheelie `Color.RGBtoHSB`, BetterF3 a garbage
+  collector bean, Iris's shader preprocessor an SLF4J binding to Log4j.
+* A mod entrypoint that fails is logged and the game continues with the others (Fabric Loader would throw
+  after the stage, and Not Enough Crashes then skipped every later stage).
+
+Light Overlay was tried and left out: it calls its own Fabric code through `MethodHandles` looked up with
+class names built at run time.
+
 ### Server protocol: 1.12.2 / 1.16.5 (ViaFabric)
 
 With [ViaFabric](https://modrinth.com/mod/viafabric) 0.4.x (it includes ViaVersion) in `./mods`, the
