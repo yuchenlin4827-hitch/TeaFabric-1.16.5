@@ -13,7 +13,7 @@ public class TSecurityManager {
     }
 
     public ThreadGroup getThreadGroup() {
-        return Thread.currentThread().getThreadGroup();
+        return null; // TeaVM's threads have no groups
     }
 
     public void checkPermission(java.security.Permission perm) {
