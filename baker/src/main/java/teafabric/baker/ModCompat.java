@@ -47,8 +47,9 @@ final class ModCompat {
      * The browser build starts the client from WebLauncher, not from Minecraft's Main.main, so mixins injected
      * at the head of Main.main never ran. Not Enough Crashes installs its platform layer there (without it the
      * game stops with a NullPointerException), Smooth Boot reads its config there. The handler calls at the
-     * head of main are collected into the generated {@code MainHooks.run(String[])}, which WebLauncher calls
-     * first; the handlers become public so it can. Always generated, empty when no mod injects there.
+     * head of main are collected into the generated {@code MainHooks} ({@code count()}, {@code run(i, args)}),
+     * which WebLauncher calls first; the handlers become public so it can. Always generated, empty when no mod
+     * injects there.
      */
     private static void mainHooks(Map<String, byte[]> classes) {
         String main = "net/minecraft/client/main/Main";
@@ -84,25 +85,57 @@ final class ModCompat {
                 classes.put(main, w.toByteArray());
             }
         }
-        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        // count() and run(i, args): WebLauncher calls each injection on its own, so one that fails (it is
+        // logged) does not keep the others from running.
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
         cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER, MAIN_HOOKS, null,
                 "java/lang/Object", null);
+        org.objectweb.asm.MethodVisitor count = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "count", "()I",
+                null, null);
+        count.visitCode();
+        count.visitLdcInsn(calls.size());
+        count.visitInsn(Opcodes.IRETURN);
+        count.visitMaxs(0, 0);
+        count.visitEnd();
         org.objectweb.asm.MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "run",
-                "([Ljava/lang/String;)V", null, null);
+                "(I[Ljava/lang/String;)V", null, null);
         mv.visitCode();
-        for (MethodInsnNode call : calls) {
+        for (int i = 0; i < calls.size(); i++) {
+            MethodInsnNode call = calls.get(i);
+            org.objectweb.asm.Label next = new org.objectweb.asm.Label();
+            mv.visitVarInsn(Opcodes.ILOAD, 0);
+            mv.visitLdcInsn(i);
+            mv.visitJumpInsn(Opcodes.IF_ICMPNE, next);
             for (org.objectweb.asm.Type t : org.objectweb.asm.Type.getArgumentTypes(call.desc)) {
                 if (t.getDescriptor().equals("[Ljava/lang/String;")) {
-                    mv.visitVarInsn(Opcodes.ALOAD, 0);
+                    mv.visitVarInsn(Opcodes.ALOAD, 1);
                 } else {
                     mv.visitInsn(Opcodes.ACONST_NULL); // the CallbackInfo, which these injections do not use
                 }
             }
             mv.visitMethodInsn(Opcodes.INVOKESTATIC, call.owner, call.name, call.desc, false);
+            mv.visitInsn(Opcodes.RETURN);
+            mv.visitLabel(next);
         }
         mv.visitInsn(Opcodes.RETURN);
         mv.visitMaxs(0, 0);
         mv.visitEnd();
+        org.objectweb.asm.MethodVisitor nm = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "name",
+                "(I)Ljava/lang/String;", null, null);
+        nm.visitCode();
+        for (int i = 0; i < calls.size(); i++) {
+            org.objectweb.asm.Label next = new org.objectweb.asm.Label();
+            nm.visitVarInsn(Opcodes.ILOAD, 0);
+            nm.visitLdcInsn(i);
+            nm.visitJumpInsn(Opcodes.IF_ICMPNE, next);
+            nm.visitLdcInsn(calls.get(i).name);
+            nm.visitInsn(Opcodes.ARETURN);
+            nm.visitLabel(next);
+        }
+        nm.visitLdcInsn("?");
+        nm.visitInsn(Opcodes.ARETURN);
+        nm.visitMaxs(0, 0);
+        nm.visitEnd();
         cw.visitEnd();
         classes.put(MAIN_HOOKS, cw.toByteArray());
         System.out.println("[baker] Generated " + MAIN_HOOKS + " with " + calls.size() + " Main.main injection(s)");

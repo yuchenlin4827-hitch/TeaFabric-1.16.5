@@ -38,6 +38,8 @@ public final class WebMain {
                 LogSink.log(1, "INFO", "TeaFabric", "early sleep done", null);
             }
             // Netty: heap buffers only, no pooling/recycling/leak sampling (no Unsafe, no direct memory here).
+            // The working directory of a desktop launch is the game directory (Smooth Boot finds config/ there).
+            System.setProperty("user.dir", teafabric.web.vfs.WebFileSystem.GAME_DIR);
             System.setProperty("io.netty.allocator.type", "unpooled");
             System.setProperty("io.netty.noPreferDirect", "true");
             System.setProperty("io.netty.noUnsafe", "true");
