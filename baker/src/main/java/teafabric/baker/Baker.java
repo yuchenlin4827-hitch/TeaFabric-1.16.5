@@ -448,7 +448,7 @@ public final class Baker implements PreLaunchEntrypoint {
      */
     private void emptyEarlyRisers(List<ModContainerImpl> mods) {
         for (ModContainerImpl mod : mods) {
-            for (net.fabricmc.loader.api.metadata.EntrypointMetadata ep
+            for (net.fabricmc.loader.impl.metadata.EntrypointMetadata ep
                     : mod.getMetadata().getEntrypoints("mm:early_risers")) {
                 String internal = ep.getValue().replace('.', '/');
                 byte[] bytes = classes.get(internal);
