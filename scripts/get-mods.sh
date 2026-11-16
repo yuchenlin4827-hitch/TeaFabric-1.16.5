@@ -12,15 +12,21 @@
 # compiled build is.
 #
 #   scripts/get-mods.sh            # then scripts/build-web.sh
+#   scripts/get-mods.sh perf       # only the performance mods: Sodium, Lithium, Phosphor, FerriteCore (perf branch)
+# MODS_DIR=... puts them into another folder (scripts/build-web.sh reads the same variable).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-mkdir -p mods .cache/mods
+export MODS_DIR=${MODS_DIR:-mods} GET_MODS_SET=${1:-all}
+mkdir -p "$MODS_DIR" .cache/mods
 python3 - <<'EOF'
 import hashlib, io, json, os, urllib.parse, urllib.request, zipfile
 
 API = 'https://api.modrinth.com/v2'
 FO_VERSION = '1.12.3'
 EXCLUDE = ('fabric-api-', 'ferritecore-2.1.0-', 'hydrogen-')
+MODS = os.environ['MODS_DIR']
+PERF_ONLY = os.environ.get('GET_MODS_SET') == 'perf'
+PERF = ('sodium-fabric-', 'lithium-fabric-', 'phosphor-fabric-')  # from the pack; FerriteCore 2.1.1 below
 EXTRA = [  # slug, version number (exact, so builds are reproducible)
     ('ferrite-core', '2.1.1-fabric'),
     ('rei', '5.12.385+fabric'),
@@ -39,7 +45,7 @@ def get(url):
 
 
 def fetch(name, url, sha512):
-    dest = os.path.join('mods', name)
+    dest = os.path.join(MODS, name)
     if os.path.exists(dest) and hashlib.sha512(open(dest, 'rb').read()).hexdigest() == sha512:
         return 'present'
     data = get(url)
@@ -56,15 +62,15 @@ index = json.loads(pack.read('modrinth.index.json'))
 n = 0
 for f in index['files']:
     name = os.path.basename(f['path'])
-    if name.startswith(EXCLUDE):
+    if name.startswith(EXCLUDE) or (PERF_ONLY and not name.startswith(PERF)):
         continue
     print('%-55s %s' % (name, fetch(name, f['downloads'][0], f['hashes']['sha512'])))
     n += 1
-for slug, number in EXTRA:
+for slug, number in (EXTRA[:1] if PERF_ONLY else EXTRA):
     v = [v for v in json.loads(get(API + '/project/%s/version' % slug)) if v['version_number'] == number
          and 'fabric' in v['loaders'] and '1.16.5' in v['game_versions']][0]
     f = next((x for x in v['files'] if x.get('primary')), v['files'][0])
     print('%-55s %s' % (f['filename'], fetch(f['filename'], f['url'], f['hashes']['sha512'])))
     n += 1
-print('%d mods in ./mods' % n)
+print('%d mods in %s' % (n, MODS))
 EOF

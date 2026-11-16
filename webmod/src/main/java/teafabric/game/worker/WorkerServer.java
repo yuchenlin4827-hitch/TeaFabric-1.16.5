@@ -78,7 +78,10 @@ public final class WorkerServer extends MinecraftServer {
         if (getCurrentPlayerCount() > 0) {
             hadPlayer = true;
         }
-        if (!paused) {
+        if (paused) {
+            // the world stands still, but connections are still served: a player leaving is noticed
+            getNetworkIo().tick();
+        } else {
             super.tick(shouldKeepTicking);
             int distance = Math.max(2, viewDistance);
             if (distance != getPlayerManager().getViewDistance()) {

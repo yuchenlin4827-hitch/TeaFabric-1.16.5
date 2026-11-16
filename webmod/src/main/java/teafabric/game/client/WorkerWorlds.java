@@ -136,7 +136,11 @@ public final class WorkerWorlds {
         if (client.world != null) {
             sawWorld = true;
         } else if (sawWorld && !(client.currentScreen instanceof WorkerLoadingScreen)) {
-            active = false; // left the world: the worker saves and stops it
+            active = false; // left the world: the worker saves and stops it (unpaused, it sees the player leave)
+            if (pauseSent) {
+                pauseSent = false;
+                WorkerBridge.send("{\"t\":\"pause\",\"on\":false}");
+            }
             return;
         }
         boolean paused = client.world != null && client.currentScreen != null && client.currentScreen.isPauseScreen();
