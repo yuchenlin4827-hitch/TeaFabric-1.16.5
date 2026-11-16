@@ -952,7 +952,10 @@ public final class GLEmu {
         ShaderJit.Variant v = variant;
         int mask = 0;
         for (int u = 0; u < 3; u++) {
-            if (texture2D[u]) {
+            // A unit enabled with no texture bound is as if texturing were disabled for it (desktop GL: an
+            // incomplete texture disables the unit). Iris unbinds every unit after its passes while the overlay
+            // unit is still enabled; sampling there gave black, which turned the HUD and the whole screen black.
+            if (texture2D[u] && boundTexture[u] > 0) {
                 mask |= 1 << u;
                 v.env[u].copyFrom(texEnv[u]);
                 v.texGenMask[u] = texGenMask[u];
@@ -1823,6 +1826,19 @@ public final class GLEmu {
         Integer src = depthAttachments.get(readFramebuffer);
         int[] f = src != null && src < glFormats.length && glFormats[src] != null ? glFormats[src]
                 : new int[] {36012, GLConst.DEPTH_COMPONENT, GLConst.FLOAT};
+        if (!allocate && dst > 0) {
+            // a depth blit needs the same format on both sides: a texture allocated in another depth format
+            // (Iris' depthtex1 and depthtex2 next to the main depth buffer) takes the source's, at its size
+            int[] df = dst < glFormats.length ? glFormats[dst] : null;
+            int[] size = dst < textureSizes.size() ? textureSizes.get(dst) : null;
+            if (df != null && df[0] != f[0] && size != null && size[0] > 0) {
+                ArrayBufferView none = null;
+                gl.texImage2D(WebGL2RenderingContext.TEXTURE_2D, 0, f[0], size[0], size[1], 0, f[1], f[2], none);
+                textureSizes.set(dst, new int[] {size[0], size[1], f[0]});
+                glFormats[dst] = f;
+                setDepthTexture(dst, true);
+            }
+        }
         if (allocate) {
             ArrayBufferView none = null; // a cast of null to a JS type is checked at run time (and fails)
             gl.texImage2D(WebGL2RenderingContext.TEXTURE_2D, 0, f[0], w, h, 0, f[1], f[2], none);
