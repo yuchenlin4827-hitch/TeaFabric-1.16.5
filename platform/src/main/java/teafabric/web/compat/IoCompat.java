@@ -47,7 +47,32 @@ public final class IoCompat {
     }
 
     public static Path toPath(File file) {
-        return Paths.get(file.getPath());
+        // absolute: relative files are relative to the game directory (the working directory of a desktop launch)
+        return Paths.get(file.getAbsolutePath());
+    }
+
+    /**
+     * Paths.get / Path.of: a relative path is made absolute against the game directory. java.io.File resolves
+     * relative paths against the working directory, but TeaVM's java.nio.file passes them to its file system
+     * as they are, which looks them up from the root (LambdaBetterGrass and LambDynamicLights could not create
+     * "config/....toml").
+     */
+    public static Path get(String first, String... more) {
+        return absolute(Paths.get(first, more));
+    }
+
+    public static Path of(String first, String... more) {
+        return absolute(Paths.get(first, more));
+    }
+
+    /** FileSystem.getPath: the same for the default file system (zip file systems keep their own paths). */
+    public static Path getPath(java.nio.file.FileSystem fs, String first, String... more) {
+        Path p = fs.getPath(first, more);
+        return fs == java.nio.file.FileSystems.getDefault() ? absolute(p) : p;
+    }
+
+    private static Path absolute(Path p) {
+        return p.isAbsolute() ? p : Paths.get(System.getProperty("user.dir", "/")).resolve(p).normalize();
     }
 
     public static FileChannel getChannel(RandomAccessFile raf) {
@@ -294,5 +319,10 @@ public final class IoCompat {
                 out.close();
             }
         }
+    }
+
+    /** Zip archives as file systems (Iris's zipped shader packs): see {@link teafabric.web.vfs.ZipFolderFileSystem}. */
+    public static java.nio.file.FileSystem newFileSystem(Path path, ClassLoader loader) throws IOException {
+        return teafabric.web.vfs.ZipFolderFileSystem.open(path);
     }
 }

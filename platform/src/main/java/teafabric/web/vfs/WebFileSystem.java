@@ -42,6 +42,9 @@ public final class WebFileSystem {
         try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(zip))) {
             ZipEntry e;
             while ((e = in.getNextEntry()) != null) {
+                if (!ZipFolderFileSystem.safeEntry(e.getName())) {
+                    continue; // never write outside the target folder
+                }
                 File f = new File(root, e.getName());
                 if (e.isDirectory()) {
                     f.mkdirs();

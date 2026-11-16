@@ -139,24 +139,24 @@ public final class WebFabricLoader implements FabricLoader {
         return result;
     }
 
+    /** Called by the generated Entrypoints when creating an entrypoint object fails (its constructor threw). */
+    public static void entrypointFailed(String modId, String key, Throwable t) {
+        teafabric.web.log.LogSink.log(3, "ERROR", "Fabric", "Entrypoint '" + key + "' of mod '" + modId
+                + "' could not be created; the game continues without it", t);
+    }
+
     @Override
     public <T> void invokeEntrypoints(String key, Class<T> type, Consumer<? super T> invoker) {
-        RuntimeException failure = null;
+        // Unlike Fabric Loader, a failing entrypoint is logged and the others still run: in a browser build a
+        // mod can fail on something the browser lacks, and with the loader's behaviour (all errors thrown after
+        // the stage) one such mod also kept every later stage from running (Iris was never initialised).
         for (EntrypointContainer<T> c : getEntrypointContainers(key, type)) {
             try {
                 invoker.accept(c.getEntrypoint());
-            } catch (RuntimeException e) {
-                RuntimeException wrapped = new RuntimeException("Could not execute entrypoint stage '" + key
-                        + "' due to errors, provided by '" + c.getProvider().getMetadata().getId() + "'", e);
-                if (failure == null) {
-                    failure = wrapped;
-                } else {
-                    failure.addSuppressed(wrapped);
-                }
+            } catch (RuntimeException | LinkageError e) {
+                teafabric.web.log.LogSink.log(3, "ERROR", "Fabric", "Entrypoint '" + key + "' of mod '"
+                        + c.getProvider().getMetadata().getId() + "' failed; the game continues without it", e);
             }
-        }
-        if (failure != null) {
-            throw failure;
         }
     }
 

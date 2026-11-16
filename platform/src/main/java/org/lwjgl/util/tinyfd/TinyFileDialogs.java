@@ -22,4 +22,10 @@ public final class TinyFileDialogs {
             CharSequence filterDescription, boolean allowMultiple) {
         return null;
     }
+
+    /** No native save dialog in the browser: callers treat null as "cancelled". */
+    public static String tinyfd_saveFileDialog(CharSequence title, CharSequence defaultPath, org.lwjgl.PointerBuffer filters,
+            CharSequence description) {
+        return null;
+    }
 }

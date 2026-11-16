@@ -26,4 +26,21 @@ public final class STBImageWrite {
         }
         return 1;
     }
+
+    /** stbi_write_png_to_func with a callback object (Fabrishot's high-resolution screenshots). */
+    public static boolean stbi_write_png_to_func(STBIWriteCallbackI func, long context, int w, int h, int comp,
+            java.nio.ByteBuffer data, int stride) {
+        int rowBytes = stride == 0 ? w * comp : stride;
+        byte[] pixels = new byte[rowBytes * h];
+        data.duplicate().get(pixels);
+        byte[] png = PngCodec.encode(pixels, w, h, comp, rowBytes);
+        long out = NativeMemory.malloc(png.length);
+        try {
+            NativeMemory.copyFromArray(png, 0, out, png.length);
+            func.invoke(context, out, png.length);
+        } finally {
+            NativeMemory.free(out);
+        }
+        return true;
+    }
 }

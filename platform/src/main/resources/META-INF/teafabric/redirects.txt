@@ -1,5 +1,17 @@
 # Call-site redirects applied by the TeaVM plugin (compiler/.../RedirectTransformer).
 # owner                  method               descriptor                                   -> target
+*java.util.Collection    parallelStream       ()Ljava/util/stream/Stream;                   -> teafabric.web.compat.LangCompat
+java.lang.Class          forName              (Ljava/lang/String;)Ljava/lang/Class;         -> teafabric.web.compat.LangCompat
+java.lang.Class          forName              (Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class; -> teafabric.web.compat.LangCompat
+java.util.Properties     store                (Ljava/io/OutputStream;Ljava/lang/String;)V   -> teafabric.web.compat.LangCompat
+java.nio.file.FileSystems newFileSystem   (Ljava/nio/file/Path;Ljava/lang/ClassLoader;)Ljava/nio/file/FileSystem; -> teafabric.web.compat.IoCompat
+java.awt.Color           RGBtoHSB             (III[F)[F                                     -> teafabric.web.compat.LangCompat
+java.lang.Package        getSpecificationVersion ()Ljava/lang/String;                      -> teafabric.web.compat.LangCompat
+java.lang.Package        getImplementationVersion ()Ljava/lang/String;                     -> teafabric.web.compat.LangCompat
+java.lang.Package        getImplementationTitle ()Ljava/lang/String;                       -> teafabric.web.compat.LangCompat
+java.util.Properties     store                (Ljava/io/Writer;Ljava/lang/String;)V         -> teafabric.web.compat.LangCompat
+org.lwjgl.PointerBuffer  flip                 ()Lorg/lwjgl/system/CustomBuffer;             -> teafabric.web.compat.LangCompat
+java.util.BitSet         stream               ()Ljava/util/stream/IntStream;                -> teafabric.web.compat.LangCompat
 java.lang.Runtime        addShutdownHook      (Ljava/lang/Thread;)V                        -> teafabric.web.compat.RuntimeCompat
 java.lang.Runtime        removeShutdownHook   (Ljava/lang/Thread;)Z                        -> teafabric.web.compat.RuntimeCompat
 java.lang.Runtime        maxMemory            ()J                                          -> teafabric.web.compat.RuntimeCompat
@@ -40,6 +52,9 @@ java.net.URL             openStream           ()Ljava/io/InputStream;           
 java.net.URL             openConnection       ()Ljava/net/URLConnection;                   -> teafabric.web.compat.UrlCompat
 java.lang.Thread         start                ()V                                          -> teafabric.web.compat.UrlCompat
 java.nio.file.Paths      get                  (Ljava/net/URI;)Ljava/nio/file/Path;         -> teafabric.web.compat.UrlCompat
+java.nio.file.Paths      get                  (Ljava/lang/String;[Ljava/lang/String;)Ljava/nio/file/Path; -> teafabric.web.compat.IoCompat
+java.nio.file.Path       of                   (Ljava/lang/String;[Ljava/lang/String;)Ljava/nio/file/Path; -> teafabric.web.compat.IoCompat
+*java.nio.file.FileSystem getPath             (Ljava/lang/String;[Ljava/lang/String;)Ljava/nio/file/Path; -> teafabric.web.compat.IoCompat
 java.nio.file.Path       of                   (Ljava/net/URI;)Ljava/nio/file/Path;         -> teafabric.web.compat.UrlCompat
 com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService createMinecraftSessionService ()Lcom/mojang/authlib/minecraft/MinecraftSessionService; -> teafabric.web.compat.OfflineSessionService
 com.mojang.authlib.AuthenticationService createMinecraftSessionService ()Lcom/mojang/authlib/minecraft/MinecraftSessionService; -> teafabric.web.compat.OfflineSessionService
@@ -53,6 +68,14 @@ java.lang.invoke.MethodHandles$Lookup findGetter (Ljava/lang/Class;Ljava/lang/St
 com.mojang.blaze3d.platform.GLX make           (Ljava/util/function/Supplier;)Ljava/lang/Object;       -> teafabric.web.compat.MinecraftCompat
 net.fabricmc.fabric.impl.client.indigo.renderer.aocalc.VanillaAoHelper initialize (Lnet/minecraft/class_778;)V -> teafabric.web.compat.MinecraftCompat
 java.util.regex.Pattern  matcher              (Ljava/lang/CharSequence;)Ljava/util/regex/Matcher; -> teafabric.web.compat.RegexCompat
+java.util.regex.Pattern  compile              (Ljava/lang/String;)Ljava/util/regex/Pattern; -> teafabric.web.compat.RegexCompat
+java.util.regex.Pattern  compile              (Ljava/lang/String;I)Ljava/util/regex/Pattern; -> teafabric.web.compat.RegexCompat
+java.util.regex.Pattern  matches              (Ljava/lang/String;Ljava/lang/CharSequence;)Z -> teafabric.web.compat.RegexCompat
+java.lang.String         split                (Ljava/lang/String;)[Ljava/lang/String;       -> teafabric.web.compat.RegexCompat
+java.lang.String         split                (Ljava/lang/String;I)[Ljava/lang/String;      -> teafabric.web.compat.RegexCompat
+java.lang.String         matches              (Ljava/lang/String;)Z                         -> teafabric.web.compat.RegexCompat
+java.lang.String         replaceAll           (Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String; -> teafabric.web.compat.RegexCompat
+java.lang.String         replaceFirst         (Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String; -> teafabric.web.compat.RegexCompat
 java.util.regex.Matcher  replaceAll           (Ljava/lang/String;)Ljava/lang/String;         -> teafabric.web.compat.RegexCompat
 java.util.regex.Matcher  replaceFirst         (Ljava/lang/String;)Ljava/lang/String;         -> teafabric.web.compat.RegexCompat
 net.minecraft.class_156  method_18349         ()Ljava/util/concurrent/Executor;            -> teafabric.web.compat.MinecraftCompat

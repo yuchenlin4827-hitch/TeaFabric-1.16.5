@@ -155,4 +155,9 @@ public class GL20 extends GL15 {
     public static void glUniformMatrix4fv(int location, boolean transpose, FloatBuffer value) {
         GLEmu.uniformMatrixfv(4, location, transpose, value);
     }
+
+    /** GL 1.1's glLoadMatrixf, reached through GL20 (LWJGL's GL20 extends GL11). */
+    public static void glLoadMatrixf(float[] m) {
+        GL11.glLoadMatrixf(m);
+    }
 }

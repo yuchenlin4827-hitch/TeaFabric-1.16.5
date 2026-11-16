@@ -34,6 +34,522 @@ final class ModCompat {
         ferriteCore(classes, resources);
         lithium(classes);
         sodium(classes);
+        slightGuiModifications(classes);
+        architecturyPlatformMethods(classes);
+        notEnoughCrashes(classes);
+        lightOverlay(classes);
+        mainHooks(classes);
+        ArchitecturyEvents.apply(classes);
+        amecs(classes);
+        shulkerBoxTooltip(classes);
+        nightConfig(classes);
+        extendedEnums(classes);
+    }
+
+    /**
+     * Enums that a mixin extends with more constants at run time (Iris adds a geometry shader type and vertex
+     * attributes to Sodium's enums: it creates instances through the constructor and appends them to the values
+     * array). TeaVM takes an enum's constants (for EnumMap, EnumSet, getEnumConstants) from its enum fields at
+     * compile time, so an EnumMap of Sodium's vertex attributes was too small and creating a world failed. Each
+     * added constant is also stored in a new enum field, in the order of their ordinals.
+     */
+    private static void extendedEnums(Map<String, byte[]> classes) {
+        for (String name : new java.util.ArrayList<>(classes.keySet())) {
+            ClassNode probe = new ClassNode();
+            new ClassReader(classes.get(name)).accept(probe, ClassReader.SKIP_CODE);
+            if ((probe.access & Opcodes.ACC_ENUM) == 0) {
+                continue;
+            }
+            String values = null;
+            for (FieldNode f : probe.fields) {
+                if ((f.access & Opcodes.ACC_STATIC) != 0 && (f.access & Opcodes.ACC_SYNTHETIC) != 0
+                        && f.desc.equals("[L" + name + ";")) {
+                    values = f.name;
+                }
+            }
+            if (values == null) {
+                continue;
+            }
+            String valuesField = values;
+            ClassNode full = new ClassNode();
+            new ClassReader(classes.get(name)).accept(full, 0);
+            MethodNode clinit = method(full, "<clinit>", "()V");
+            if (clinit == null) {
+                continue;
+            }
+            int puts = 0;
+            for (AbstractInsnNode insn = clinit.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn.getOpcode() == Opcodes.PUTSTATIC && ((FieldInsnNode) insn).owner.equals(name)
+                        && ((FieldInsnNode) insn).name.equals(valuesField)) {
+                    puts++;
+                }
+            }
+            if (puts < 2) {
+                continue;
+            }
+            patch(classes, name, node -> {
+                MethodNode m = method(node, "<clinit>", "()V");
+                int added = 0;
+                for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (insn.getOpcode() != Opcodes.PUTSTATIC) {
+                        continue;
+                    }
+                    FieldInsnNode put = (FieldInsnNode) insn;
+                    if (put.owner.equals(name) || !put.desc.equals("L" + name + ";")) {
+                        continue;
+                    }
+                    String field = "teafabric$" + put.name;
+                    node.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL
+                            | Opcodes.ACC_ENUM, field, put.desc, null, null));
+                    InsnList copy = new InsnList();
+                    copy.add(new InsnNode(Opcodes.DUP));
+                    copy.add(new FieldInsnNode(Opcodes.PUTSTATIC, name, field, put.desc));
+                    m.instructions.insertBefore(put, copy);
+                    System.out.println("[baker] Enum " + name + ": constant " + put.owner + "." + put.name
+                            + " added by a mixin is an enum field");
+                    added++;
+                }
+                return added > 0;
+            });
+        }
+    }
+
+    /**
+     * Night Config (shaded into LambDynamicLights and LambdaBetterGrass) finds its file formats by loading them
+     * with Class.forName, whose static initialiser registers the file extension. The static initialiser of
+     * FormatDetector registers each format of the same copy directly instead (by its instance() method).
+     */
+    private static void nightConfig(Map<String, byte[]> classes) {
+        String suffix = "/core/file/FormatDetector";
+        String[][] formats = {{"toml/TomlFormat", "toml"}, {"json/JsonFormat", "json"}, {"hocon/HoconFormat", "conf"},
+                {"yaml/YamlFormat", "yaml"}};
+        // Its file watcher (configs that reload when the file changes) needs a WatchService: nothing is watched,
+        // and its polling thread is not started.
+        for (String watcher : new java.util.ArrayList<>(classes.keySet())) {
+            if (!watcher.endsWith("/core/file/FileWatcher") || !watcher.contains("nightconfig")) {
+                continue;
+            }
+            patch(classes, watcher, node -> {
+                boolean changed = false;
+                for (MethodNode m : node.methods) {
+                    if ((m.name.equals("addWatch") || m.name.equals("setWatch"))
+                            && m.desc.equals("(Ljava/nio/file/Path;Ljava/lang/Runnable;)V")) {
+                        InsnList code = new InsnList();
+                        code.add(new InsnNode(Opcodes.RETURN));
+                        replace(m, code);
+                        changed = true;
+                    } else if (m.name.equals("<init>")) {
+                        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                            if (insn instanceof MethodInsnNode && ((MethodInsnNode) insn).owner.equals("java/lang/Thread")
+                                    && ((MethodInsnNode) insn).name.equals("start")) {
+                                InsnNode pop = new InsnNode(Opcodes.POP);
+                                m.instructions.set(insn, pop);
+                                insn = pop;
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+                if (changed) {
+                    System.out.println("[baker] Night Config: " + watcher + " watches nothing");
+                }
+                return changed;
+            });
+        }
+        for (String detector : new java.util.ArrayList<>(classes.keySet())) {
+            if (!detector.endsWith(suffix) || !detector.contains("nightconfig")) {
+                continue;
+            }
+            String root = detector.substring(0, detector.length() - suffix.length());
+            String configFormat = "L" + root + "/core/ConfigFormat;";
+            patch(classes, detector, node -> {
+                MethodNode clinit = method(node, "<clinit>", "()V");
+                MethodNode register = method(node, "registerExtension", "(Ljava/lang/String;" + configFormat + ")V");
+                if (clinit == null || register == null) {
+                    return false;
+                }
+                InsnList code = new InsnList();
+                for (String[] f : formats) {
+                    String format = root + "/" + f[0];
+                    byte[] bytes = classes.get(format);
+                    if (bytes == null) {
+                        continue;
+                    }
+                    ClassNode fn = new ClassNode();
+                    new ClassReader(bytes).accept(fn, ClassReader.SKIP_CODE);
+                    if (method(fn, "instance", "()L" + format + ";") == null) {
+                        continue;
+                    }
+                    code.add(new org.objectweb.asm.tree.LdcInsnNode(f[1]));
+                    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, format, "instance", "()L" + format + ";", false));
+                    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, detector, "registerExtension",
+                            "(Ljava/lang/String;" + configFormat + ")V", false));
+                    System.out.println("[baker] Night Config: " + format + " registered for ." + f[1]);
+                }
+                if (code.size() == 0) {
+                    return false;
+                }
+                for (AbstractInsnNode insn = clinit.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (insn.getOpcode() == Opcodes.RETURN) {
+                        InsnList copy = new InsnList();
+                        for (AbstractInsnNode c = code.getFirst(); c != null; c = c.getNext()) {
+                            copy.add(c.clone(java.util.Collections.emptyMap()));
+                        }
+                        clinit.instructions.insertBefore(insn, copy);
+                    }
+                }
+                return true;
+            });
+        }
+    }
+
+    /**
+     * ShulkerBoxTooltip validates its config after loading by creating the validator classes named in field
+     * annotations reflectively, which fails here; the validators only clamp values a player typed, so the
+     * validation is skipped.
+     */
+    private static void shulkerBoxTooltip(Map<String, byte[]> classes) {
+        String config = "com/misterpemodder/shulkerboxtooltip/impl/config/Configuration";
+        if (!classes.containsKey(config)) {
+            return;
+        }
+        patch(classes, config, node -> {
+            MethodNode m = method(node, "validatePostLoad", "()V");
+            if (m == null) {
+                return false;
+            }
+            InsnList code = new InsnList();
+            code.add(new InsnNode(Opcodes.RETURN));
+            replace(m, code);
+            return true;
+        });
+    }
+
+    /**
+     * Amecs (bundled in Mouse Wheelie) reaches the key binding map through a static method its mixin adds to
+     * KeyBinding, looked up by reflection; the call becomes direct (without it, loading the options failed).
+     */
+    private static void amecs(Map<String, byte[]> classes) {
+        String utils = "de/siphalor/amecs/api/KeyBindingUtils";
+        String key = "net/minecraft/class_304";
+        if (!classes.containsKey(utils) || !classes.containsKey(key)) {
+            return;
+        }
+        boolean[] found = new boolean[1];
+        patch(classes, key, node -> {
+            MethodNode m = method(node, "amecs$getIdToKeyBindingMap", "()Ljava/util/Map;");
+            if (m == null) {
+                return false;
+            }
+            m.access = (m.access & ~Opcodes.ACC_PRIVATE) | Opcodes.ACC_PUBLIC;
+            found[0] = true;
+            return true;
+        });
+        if (!found[0]) {
+            return;
+        }
+        patch(classes, utils, node -> {
+            MethodNode m = method(node, "getIdToKeyBindingMap", "()Ljava/util/Map;");
+            if (m == null) {
+                return false;
+            }
+            InsnList code = new InsnList();
+            code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, key, "amecs$getIdToKeyBindingMap", "()Ljava/util/Map;",
+                    false));
+            code.add(new InsnNode(Opcodes.ARETURN));
+            replace(m, code);
+            return true;
+        });
+    }
+
+    static final String MAIN_HOOKS = "teafabric/generated/MainHooks";
+
+    /**
+     * The browser build starts the client from WebLauncher, not from Minecraft's Main.main, so mixins injected
+     * at the head of Main.main never ran. Not Enough Crashes installs its platform layer there (without it the
+     * game stops with a NullPointerException), Smooth Boot reads its config there. The handler calls at the
+     * head of main are collected into the generated {@code MainHooks} ({@code count()}, {@code run(i, args)}),
+     * which WebLauncher calls first; the handlers become public so it can. Always generated, empty when no mod
+     * injects there.
+     */
+    private static void mainHooks(Map<String, byte[]> classes) {
+        String main = "net/minecraft/client/main/Main";
+        java.util.List<MethodInsnNode> calls = new java.util.ArrayList<>();
+        if (classes.containsKey(main)) {
+            ClassNode node = new ClassNode();
+            new ClassReader(classes.get(main)).accept(node, 0);
+            MethodNode m = method(node, "main", "([Ljava/lang/String;)V");
+            java.util.Set<String> handlers = new java.util.HashSet<>();
+            if (m != null) {
+                for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    int op = insn.getOpcode();
+                    if (op < 0 || op == Opcodes.ALOAD || op == Opcodes.ACONST_NULL) {
+                        continue;
+                    }
+                    if (op == Opcodes.INVOKESTATIC && ((MethodInsnNode) insn).owner.equals(main)
+                            && ((MethodInsnNode) insn).name.startsWith("handler$")) {
+                        calls.add((MethodInsnNode) insn);
+                        handlers.add(((MethodInsnNode) insn).name + ((MethodInsnNode) insn).desc);
+                        continue;
+                    }
+                    break; // the original code of main starts here
+                }
+            }
+            if (!handlers.isEmpty()) {
+                for (MethodNode h : node.methods) {
+                    if (handlers.contains(h.name + h.desc)) {
+                        h.access = (h.access & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
+                    }
+                }
+                ClassWriter w = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+                node.accept(w);
+                classes.put(main, w.toByteArray());
+            }
+        }
+        // count() and run(i, args): WebLauncher calls each injection on its own, so one that fails (it is
+        // logged) does not keep the others from running.
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
+        cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER, MAIN_HOOKS, null,
+                "java/lang/Object", null);
+        org.objectweb.asm.MethodVisitor count = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "count", "()I",
+                null, null);
+        count.visitCode();
+        count.visitLdcInsn(calls.size());
+        count.visitInsn(Opcodes.IRETURN);
+        count.visitMaxs(0, 0);
+        count.visitEnd();
+        org.objectweb.asm.MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "run",
+                "(I[Ljava/lang/String;)V", null, null);
+        mv.visitCode();
+        for (int i = 0; i < calls.size(); i++) {
+            MethodInsnNode call = calls.get(i);
+            org.objectweb.asm.Label next = new org.objectweb.asm.Label();
+            mv.visitVarInsn(Opcodes.ILOAD, 0);
+            mv.visitLdcInsn(i);
+            mv.visitJumpInsn(Opcodes.IF_ICMPNE, next);
+            for (org.objectweb.asm.Type t : org.objectweb.asm.Type.getArgumentTypes(call.desc)) {
+                if (t.getDescriptor().equals("[Ljava/lang/String;")) {
+                    mv.visitVarInsn(Opcodes.ALOAD, 1);
+                } else {
+                    mv.visitInsn(Opcodes.ACONST_NULL); // the CallbackInfo, which these injections do not use
+                }
+            }
+            mv.visitMethodInsn(Opcodes.INVOKESTATIC, call.owner, call.name, call.desc, false);
+            mv.visitInsn(Opcodes.RETURN);
+            mv.visitLabel(next);
+        }
+        mv.visitInsn(Opcodes.RETURN);
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
+        org.objectweb.asm.MethodVisitor nm = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "name",
+                "(I)Ljava/lang/String;", null, null);
+        nm.visitCode();
+        for (int i = 0; i < calls.size(); i++) {
+            org.objectweb.asm.Label next = new org.objectweb.asm.Label();
+            nm.visitVarInsn(Opcodes.ILOAD, 0);
+            nm.visitLdcInsn(i);
+            nm.visitJumpInsn(Opcodes.IF_ICMPNE, next);
+            nm.visitLdcInsn(calls.get(i).name);
+            nm.visitInsn(Opcodes.ARETURN);
+            nm.visitLabel(next);
+        }
+        nm.visitLdcInsn("?");
+        nm.visitInsn(Opcodes.ARETURN);
+        nm.visitMaxs(0, 0);
+        nm.visitEnd();
+        cw.visitEnd();
+        classes.put(MAIN_HOOKS, cw.toByteArray());
+        System.out.println("[baker] Generated " + MAIN_HOOKS + " with " + calls.size() + " Main.main injection(s)");
+    }
+
+    /**
+     * Light Overlay calls its Fabric implementation of the frustum test through a MethodHandle looked up by
+     * name at run time; the call becomes a direct one.
+     */
+    private static void lightOverlay(Map<String, byte[]> classes) {
+        String overlay = "me/shedaniel/lightoverlay/common/fabric/LightOverlay";
+        String impl = "me/shedaniel/lightoverlay/fabric/LightOverlayImpl";
+        if (!classes.containsKey(overlay) || !classes.containsKey(impl)) {
+            return;
+        }
+        String desc = "(Lnet/minecraft/class_4604;DDDDDD)Z";
+        patch(classes, overlay, node -> {
+            MethodNode m = method(node, "isFrustumVisible", desc);
+            if (m == null) {
+                return false;
+            }
+            InsnList code = new InsnList();
+            code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            for (int i = 0; i < 6; i++) {
+                code.add(new VarInsnNode(Opcodes.DLOAD, 1 + 2 * i));
+            }
+            code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, impl, "isFrustumVisible", desc, false));
+            code.add(new InsnNode(Opcodes.IRETURN));
+            replace(m, code);
+            return true;
+        });
+    }
+
+    /**
+     * Not Enough Crashes, at start-up, downloads Yarn mappings (to show crash stack traces with readable names),
+     * installs a Log4j rewrite policy for the same purpose, and installs a SecurityManager that turns
+     * System.exit into an exception. None of these exist in a browser; the crash and recovery screens, the
+     * mod's purpose, do not depend on them. Identifying the mods in a stack trace reads each class's code
+     * source (its jar), which compiled classes do not have, so the list of suspected mods stays empty.
+     */
+    private static void notEnoughCrashes(Map<String, byte[]> classes) {
+        String deobf = "fudge/notenoughcrashes/fabric/StacktraceDeobfuscator";
+        if (classes.containsKey(deobf)) {
+            patch(classes, deobf, node -> {
+                int done = 0;
+                for (MethodNode m : node.methods) {
+                    InsnList code = new InsnList();
+                    if ((m.name.equals("init") && m.desc.equals("()V"))
+                            || (m.name.equals("deobfuscateThrowable") && m.desc.equals("(Ljava/lang/Throwable;)V"))) {
+                        code.add(new InsnNode(Opcodes.RETURN));
+                    } else if (m.name.equals("deobfuscateStacktrace")
+                            && m.desc.equals("([Ljava/lang/StackTraceElement;Z)[Ljava/lang/StackTraceElement;")) {
+                        code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                        code.add(new InsnNode(Opcodes.ARETURN));
+                    } else {
+                        continue;
+                    }
+                    replace(m, code);
+                    done++;
+                }
+                return done == 3;
+            });
+        }
+        String exitBlock = "fudge/notenoughcrashes/utils/SystemExitBlock";
+        if (classes.containsKey(exitBlock)) {
+            patch(classes, exitBlock, node -> {
+                MethodNode m = method(node, "forbidSystemExitCall", "()V");
+                if (m == null) {
+                    return false;
+                }
+                InsnList code = new InsnList();
+                code.add(new InsnNode(Opcodes.RETURN));
+                replace(m, code);
+                return true;
+            });
+        }
+        String identifier = "fudge/notenoughcrashes/stacktrace/ModIdentifier";
+        if (classes.containsKey(identifier)) {
+            patch(classes, identifier, node -> {
+                MethodNode m = method(node, "identifyFromStacktrace", "(Ljava/lang/Throwable;)Ljava/util/Set;");
+                if (m == null) {
+                    return false;
+                }
+                InsnList code = new InsnList();
+                code.add(new TypeInsnNode(Opcodes.NEW, "java/util/HashSet"));
+                code.add(new InsnNode(Opcodes.DUP));
+                code.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/util/HashSet", "<init>", "()V", false));
+                code.add(new InsnNode(Opcodes.ARETURN));
+                replace(m, code);
+                return true;
+            });
+        }
+    }
+
+    /**
+     * Architectury's @ExpectPlatform methods (used by Architectury API and by mods built with it: Cloth Config,
+     * BetterF3, Light Overlay, Not Enough Crashes) are invokedynamic calls whose bootstrap method, PlatformMethods
+     * .platform, finds the loader's implementation by name at run time and returns a call site for it. TeaVM
+     * cannot run bootstrap methods, so each call becomes the direct call the bootstrap would have produced: a
+     * static method of the same name and type in {@code <package>.fabric.<class name without $>Impl}.
+     */
+    private static void architecturyPlatformMethods(Map<String, byte[]> classes) {
+        byte[] marker = "PlatformMethods".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        int sites = 0;
+        int patched = 0;
+        for (Map.Entry<String, byte[]> e : classes.entrySet()) {
+            if (!contains(e.getValue(), marker)) {
+                continue;
+            }
+            String caller = e.getKey();
+            ClassNode node = new ClassNode();
+            new ClassReader(e.getValue()).accept(node, 0);
+            int slash = caller.lastIndexOf('/');
+            String impl = caller.substring(0, slash + 1) + "fabric/" + caller.substring(slash + 1).replace("$", "")
+                    + "Impl";
+            int here = 0;
+            for (MethodNode m : node.methods) {
+                for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (!(insn instanceof InvokeDynamicInsnNode)) {
+                        continue;
+                    }
+                    InvokeDynamicInsnNode indy = (InvokeDynamicInsnNode) insn;
+                    if (!indy.bsm.getName().equals("platform") || !indy.bsm.getOwner().endsWith("/PlatformMethods")
+                            || !indy.bsm.getDesc().equals("(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                                    + "Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;")) {
+                        continue;
+                    }
+                    if (!classes.containsKey(impl)) {
+                        System.out.println("[baker] WARNING: no platform implementation " + impl + " for "
+                                + caller + "." + indy.name + indy.desc);
+                        continue;
+                    }
+                    MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, impl, indy.name, indy.desc, false);
+                    m.instructions.set(indy, call);
+                    insn = call;
+                    here++;
+                }
+            }
+            if (here > 0) {
+                ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+                node.accept(writer);
+                e.setValue(writer.toByteArray());
+                sites += here;
+                patched++;
+            }
+        }
+        if (sites > 0) {
+            System.out.println("[baker] Compat patch: " + sites + " Architectury platform call(s) in " + patched
+                    + " class(es) made direct");
+        }
+    }
+
+    private static boolean contains(byte[] bytes, byte[] part) {
+        outer:
+        for (int i = 0, n = bytes.length - part.length; i <= n; i++) {
+            for (int j = 0; j < part.length; j++) {
+                if (bytes[i + j] != part[j]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Slight GUI Modifications runs config/slightguimodifications/cts.groovy (custom title screen elements, off by
+     * default) with an embedded Groovy, which generates classes at run time and cannot run here. Loading the
+     * script becomes a no-op and the Groovy shell is never created, so none of Groovy is compiled in (about
+     * 3,300 classes); the mod's other features are unaffected.
+     */
+    private static void slightGuiModifications(Map<String, byte[]> classes) {
+        String registry = "me/shedaniel/slightguimodifications/gui/cts/CtsRegistry";
+        if (!classes.containsKey(registry)) {
+            return;
+        }
+        patch(classes, registry, node -> {
+            int done = 0;
+            for (MethodNode m : node.methods) {
+                InsnList code = new InsnList();
+                if ((m.name.equals("loadScripts") || m.name.equals("loadScriptsAsync")) && m.desc.equals("()V")) {
+                    code.add(new InsnNode(Opcodes.RETURN));
+                } else if (m.name.startsWith("lambda$") && m.desc.equals("()Lgroovy/lang/GroovyShell;")) {
+                    code.add(new InsnNode(Opcodes.ACONST_NULL));
+                    code.add(new InsnNode(Opcodes.ARETURN));
+                } else {
+                    continue;
+                }
+                replace(m, code);
+                done++;
+            }
+            return done >= 2;
+        });
     }
 
     /**

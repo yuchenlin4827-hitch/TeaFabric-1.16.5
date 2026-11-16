@@ -62,30 +62,67 @@ public final class MinecraftCompat {
         }
     };
 
-    /** One green thread running queued tasks, giving the browser a turn regularly (Thread.yield time-slices). */
-    static final class YieldingWorker implements java.util.concurrent.Executor {
+    /**
+     * Green threads running queued tasks, giving the browser a turn regularly (Thread.yield time-slices).
+     * One thread normally; another is started when every worker is blocked inside a task (waiting for a
+     * future) while tasks are queued, which on a JVM's pool would run on another thread. Without that, a
+     * task waiting for a task queued behind it on the same thread deadlocked world generation (seen with
+     * Lithium: "Preparing spawn area" stopped for good in about one new world in six).
+     */
+    public static final class YieldingWorker implements java.util.concurrent.Executor {
         static final YieldingWorker INSTANCE = new YieldingWorker();
+        private static final int MAX_THREADS = 8;
         private final java.util.concurrent.LinkedBlockingQueue<Runnable> queue =
                 new java.util.concurrent.LinkedBlockingQueue<>();
-        private Thread thread;
+        private final java.util.List<WorkerThread> threads = new java.util.ArrayList<>();
+        private int blocked;
+
+        static final class WorkerThread extends Thread {
+            boolean idle;
+            boolean blocked;
+
+            WorkerThread(int n) {
+                super(n == 0 ? "Worker-Main" : "Worker-Main-" + n);
+                setDaemon(true);
+            }
+
+            @Override
+            public void run() {
+                INSTANCE.work(this);
+            }
+        }
 
         @Override
         public void execute(Runnable task) {
             queue.add(task);
-            if (thread == null) {
-                thread = new Thread(this::run, "Worker-Main");
-                thread.setDaemon(true);
-                thread.start();
+            if (threads.isEmpty() || blocked >= threads.size()) {
+                startThread();
             }
         }
 
-        private void run() {
+        private void startThread() {
+            if (threads.size() >= MAX_THREADS) {
+                return;
+            }
+            WorkerThread thread = new WorkerThread(threads.size());
+            threads.add(thread);
+            if (threads.size() > 1) {
+                teafabric.web.log.LogSink.log(1, "INFO", "Worker", "All " + (threads.size() - 1)
+                        + " worker thread(s) are waiting inside tasks; starting " + thread.getName(), null);
+            }
+            thread.start();
+        }
+
+        private void work(WorkerThread self) {
             while (true) {
                 Runnable task;
+                self.idle = true;
                 try {
                     task = queue.take();
                 } catch (InterruptedException e) {
                     continue;
+                } finally {
+                    self.idle = false;
                 }
                 try {
                     task.run();
@@ -93,6 +130,32 @@ public final class MinecraftCompat {
                     teafabric.web.log.LogSink.log(3, "ERROR", "Worker", "Uncaught exception in worker task", t);
                 }
                 Thread.yield();
+            }
+        }
+
+        /** Called by every untimed wait in the concurrency shims (WaitTracker.waitOn) before it blocks. */
+        public static void beforeBlock() {
+            Thread current = Thread.currentThread();
+            if (!(current instanceof WorkerThread)) {
+                return;
+            }
+            WorkerThread worker = (WorkerThread) current;
+            if (worker.idle || worker.blocked) {
+                return; // waiting for the next task, or already counted
+            }
+            worker.blocked = true;
+            INSTANCE.blocked++;
+            if (INSTANCE.blocked >= INSTANCE.threads.size() && !INSTANCE.queue.isEmpty()) {
+                INSTANCE.startThread();
+            }
+        }
+
+        /** After the wait that {@link #beforeBlock} saw. */
+        public static void afterBlock() {
+            Thread current = Thread.currentThread();
+            if (current instanceof WorkerThread && ((WorkerThread) current).blocked) {
+                ((WorkerThread) current).blocked = false;
+                INSTANCE.blocked--;
             }
         }
     }

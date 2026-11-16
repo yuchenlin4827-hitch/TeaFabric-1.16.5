@@ -57,6 +57,12 @@ public final class WebWindow {
     @JSBody(params = "title", script = "document.title = title;")
     public static native void setTitle(String title);
 
+    @JSBody(script = "return document.hasFocus();")
+    public static native boolean focused();
+
+    @JSBody(script = "return !document.hidden;")
+    public static native boolean visible();
+
     @JSBody(params = "on", script = "teafabric.setFullscreen(on);")
     public static native void setFullscreen(boolean on);
 

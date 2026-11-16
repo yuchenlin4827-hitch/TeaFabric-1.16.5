@@ -22,6 +22,13 @@ rm -rf "$OUT/dist"
 mkdir -p "$OUT/dist"
 # The page and the runtime; not the test pages (build/web/mini*).
 cp build/web/index.html build/web/boot.js build/web/style.css "$OUT/dist/"
+# The WebGPU renderer (?webgpu): the WebGL-on-WebGPU layer, the shader converter and naga (shader translator).
+if [ -d build/web/webgpu ]; then
+  mkdir -p "$OUT/dist/webgpu/naga"
+  cp build/web/webgpu/webgpu-gl.js build/web/webgpu/glsl-vk.js "$OUT/dist/webgpu/"
+  cp build/web/webgpu/naga/naga.js build/web/webgpu/naga/naga_bg.wasm build/web/webgpu/naga/LICENSE-* \
+    build/web/webgpu/naga/README.txt "$OUT/dist/webgpu/naga/"
+fi
 # The server players see in the multiplayer list on their first visit (boot.js reads servers.json).
 if [ -n "${SERVER_ADDRESS:-}" ]; then
   node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify([{ name: process.argv[2], ip: process.argv[3] }]))' "$OUT/dist/servers.json" "${SERVER_NAME:-TeaFabric 伺服器}" "$SERVER_ADDRESS"

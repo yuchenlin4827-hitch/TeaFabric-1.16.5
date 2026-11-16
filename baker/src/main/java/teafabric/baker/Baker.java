@@ -119,6 +119,8 @@ public final class Baker implements PreLaunchEntrypoint {
         resources.put("teafabric/mods.json", json.toString().getBytes(StandardCharsets.UTF_8));
 
         ModCompat.apply(classes, resources);
+        emptyEarlyRisers(mods);
+        writeReflectiveClasses();
         generateSyntheticClasses();
         collectMixinExtrasClasses();
         classes.put(EntrypointGenerator.CLASS_NAME, new EntrypointGenerator(classes).generate(entrypoints));
@@ -440,6 +442,486 @@ public final class Baker implements PreLaunchEntrypoint {
         sb.append("}}");
     }
 
+    /**
+     * Manningham Mills' early risers (Runnables that transform classes while the game launches) already ran in
+     * the baker; their run() is emptied so none of their ASM code is compiled in.
+     */
+    private void emptyEarlyRisers(List<ModContainerImpl> mods) {
+        for (ModContainerImpl mod : mods) {
+            for (net.fabricmc.loader.impl.metadata.EntrypointMetadata ep
+                    : mod.getMetadata().getEntrypoints("mm:early_risers")) {
+                String internal = ep.getValue().replace('.', '/');
+                byte[] bytes = classes.get(internal);
+                if (bytes == null) {
+                    continue;
+                }
+                org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+                new org.objectweb.asm.ClassReader(bytes).accept(node, 0);
+                node.methods.removeIf(m -> m.name.startsWith("lambda$"));
+                for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+                    if (m.name.equals("run") && m.desc.equals("()V")) {
+                        m.instructions = new org.objectweb.asm.tree.InsnList();
+                        m.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.RETURN));
+                        m.tryCatchBlocks.clear();
+                        if (m.localVariables != null) {
+                            m.localVariables.clear();
+                        }
+                    }
+                }
+                org.objectweb.asm.ClassWriter w = new org.objectweb.asm.ClassWriter(org.objectweb.asm.ClassWriter.COMPUTE_MAXS);
+                node.accept(w);
+                classes.put(internal, w.toByteArray());
+                System.out.println("[baker] Emptied early riser " + internal);
+            }
+        }
+    }
+
+    /** Every string in the mods' custom metadata (some name classes that a mod instantiates by name). */
+    private static final java.util.Set<String> CUSTOM_STRINGS = new java.util.TreeSet<>();
+
+    /**
+     * Classes named in custom metadata (WTHIT's "waila:plugins" initializers, for instance) are created with
+     * Class.forName(name).getConstructor().newInstance(); the compiler keeps them findable by name with their
+     * constructors (TeaFabricReflection reads this list).
+     */
+    private void writeReflectiveClasses() {
+        StringBuilder list = new StringBuilder();
+        StringBuilder shown = new StringBuilder();
+        for (String s : CUSTOM_STRINGS) {
+            String internal = s.replace('.', '/');
+            if (s.indexOf('.') > 0 && s.indexOf(' ') < 0 && classes.containsKey(internal)) {
+                list.append(s).append('\n');
+                shown.append(' ').append(s);
+            }
+        }
+        java.util.Set<String> byName = forNameStrings();
+        for (String c : byName) {
+            list.append(c.replace('/', '.')).append('\n');
+        }
+        java.util.Set<String> data = dataClasses();
+        for (String d : data) {
+            list.append("data ").append(d.replace('/', '.')).append('\n');
+        }
+        // TeaVM's Class.forName only finds classes that the program references; this class references them all.
+        java.util.Set<String> keep = new java.util.TreeSet<>(byName);
+        keep.addAll(data);
+        for (String s : CUSTOM_STRINGS) {
+            if (s.indexOf('.') > 0 && s.indexOf(' ') < 0 && classes.containsKey(s.replace('.', '/'))) {
+                keep.add(s.replace('.', '/'));
+            }
+        }
+        classes.put("teafabric/generated/Reflective", reflectiveKeeper(keep));
+        System.out.println("[baker] Classes loaded by name with Class.forName(\"...\"): " + byName.size());
+        resources.put("META-INF/teafabric/reflective-classes.txt", list.toString().getBytes(StandardCharsets.UTF_8));
+        System.out.println("[baker] Classes named in mod metadata, findable by name:" + shown);
+        System.out.println("[baker] Config data classes with reflective fields and constructors: " + data.size());
+    }
+
+    /**
+     * Classes that config libraries fill by reflection: AutoConfig's ConfigData implementations and classes
+     * passed as a class literal to a fromJson method (Gson, Jankson), with the classes of their fields
+     * (generic arguments included) and their superclasses, as far as they belong to mods.
+     */
+    private java.util.Set<String> dataClasses() {
+        java.util.Set<String> roots = new java.util.TreeSet<>();
+        java.util.Set<String> selfOnly = new java.util.TreeSet<>(); // their own fields only, no closure
+        byte[] configData = "ConfigData".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] fromJson = "fromJson".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] getDeclaredField = "getDeclaredField".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] configBytes = "Config".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] configLower = "config".getBytes(StandardCharsets.ISO_8859_1);
+        for (Map.Entry<String, byte[]> e : classes.entrySet()) {
+            byte[] b = e.getValue();
+            boolean cd = contains(b, configData);
+            boolean fj = contains(b, fromJson) || contains(b, getDeclaredField) || contains(b, configBytes)
+                    || contains(b, configLower);
+            if ((!cd && !fj) || e.getKey().startsWith("net/minecraft/") || e.getKey().startsWith("com/mojang/")
+                    || e.getKey().startsWith("groovy") || e.getKey().startsWith("org/codehaus/")) {
+                continue;
+            }
+            org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+            new org.objectweb.asm.ClassReader(b).accept(node, 0);
+            if (cd) {
+                for (String i : node.interfaces) {
+                    if (i.endsWith("/autoconfig/ConfigData") || i.endsWith("/autoconfig1u/ConfigData")) {
+                        roots.add(node.name);
+                    }
+                }
+            }
+            if (fj) {
+                for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+                    for (org.objectweb.asm.tree.AbstractInsnNode insn = m.instructions.getFirst(); insn != null;
+                            insn = insn.getNext()) {
+                        if (!(insn instanceof org.objectweb.asm.tree.MethodInsnNode)) {
+                            continue;
+                        }
+                        org.objectweb.asm.tree.MethodInsnNode call = (org.objectweb.asm.tree.MethodInsnNode) insn;
+                        // fromJson(..., X.class) of Gson/Jankson; X.class passed to a config library's method or
+                        // constructor (AutoConfig.register, WTHIT's JsonConfig.Builder); X.class.getDeclaredField
+                        // (REI sets its Internals' static fields by name)
+                        boolean classArg = call.desc.contains("Ljava/lang/Class;");
+                        boolean fromJsonCall = call.name.equals("fromJson") && call.desc.contains("Ljava/lang/Class;)");
+                        String simple = call.owner.substring(call.owner.lastIndexOf('/') + 1);
+                        boolean configCall = classArg && simple.contains("Config") && !call.owner.startsWith("java/")
+                                && !call.owner.contains("/shadow");
+                        boolean fieldLookup = call.owner.equals("java/lang/Class")
+                                && (call.name.equals("getDeclaredField") || call.name.equals("getDeclaredFields"));
+                        if (!fromJsonCall && !configCall && !fieldLookup) {
+                            continue;
+                        }
+                        org.objectweb.asm.tree.AbstractInsnNode p = insn.getPrevious();
+                        int back = fromJsonCall ? 1 : 4;
+                        for (int k = 0; p != null && k < back; p = p.getPrevious()) {
+                            if (p.getOpcode() < 0) {
+                                continue;
+                            }
+                            k++;
+                            if (p instanceof org.objectweb.asm.tree.LdcInsnNode
+                                    && ((org.objectweb.asm.tree.LdcInsnNode) p).cst instanceof org.objectweb.asm.Type) {
+                                org.objectweb.asm.Type t = (org.objectweb.asm.Type) ((org.objectweb.asm.tree.LdcInsnNode) p).cst;
+                                if (t.getSort() == org.objectweb.asm.Type.OBJECT) {
+                                    (fieldLookup ? selfOnly : roots).add(t.getInternalName());
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // subclasses of ConfigData implementations (AutoConfig's example extends PartitioningSerializer.GlobalData)
+        java.util.Map<String, String> supers = new java.util.HashMap<>();
+        for (Map.Entry<String, byte[]> e : classes.entrySet()) {
+            try {
+                supers.put(e.getKey(), new org.objectweb.asm.ClassReader(e.getValue()).getSuperName());
+            } catch (RuntimeException ex) {
+                // not a class file we can read
+            }
+        }
+        java.util.Set<String> implementors = new java.util.HashSet<>(roots);
+        for (String c : supers.keySet()) {
+            for (String p = supers.get(c); p != null; p = supers.get(p)) {
+                if (implementors.contains(p)) {
+                    roots.add(c);
+                    break;
+                }
+            }
+        }
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        for (String c : selfOnly) {
+            if (isModClass(c)) {
+                out.add(c);
+            }
+        }
+        java.util.Set<String> prefixes = new java.util.HashSet<>();
+        for (String r : roots) {
+            prefixes.add(packagePrefix(r));
+        }
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>(roots);
+        while (!queue.isEmpty()) {
+            String c = queue.poll();
+            // the classes of a config's fields, as far as they belong to the same mod (same package tree)
+            if (!isModClass(c) || !prefixes.contains(packagePrefix(c)) || !out.add(c)) {
+                continue;
+            }
+            org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+            new org.objectweb.asm.ClassReader(classes.get(c)).accept(node, org.objectweb.asm.ClassReader.SKIP_CODE);
+            if (node.superName != null) {
+                queue.add(node.superName);
+            }
+            for (org.objectweb.asm.tree.FieldNode f : node.fields) {
+                if ((f.access & Opcodes.ACC_STATIC) != 0) {
+                    continue;
+                }
+                // classes named in the field's annotations (AutoConfig validators, created by reflection)
+                if (f.visibleAnnotations != null) {
+                    for (org.objectweb.asm.tree.AnnotationNode a : f.visibleAnnotations) {
+                        annotationClasses(a.values, queue);
+                    }
+                }
+                String sig = f.signature != null ? f.signature : f.desc;
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("L([\\w/$]+)[;<]").matcher(sig);
+                while (m.find()) {
+                    queue.add(m.group(1));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void annotationClasses(java.util.List<Object> values, java.util.Deque<String> queue) {
+        if (values == null) {
+            return;
+        }
+        for (Object v : values) {
+            if (v instanceof org.objectweb.asm.Type && ((org.objectweb.asm.Type) v).getSort() == org.objectweb.asm.Type.OBJECT) {
+                queue.add(((org.objectweb.asm.Type) v).getInternalName());
+            } else if (v instanceof java.util.List) {
+                annotationClasses((java.util.List<Object>) v, queue);
+            } else if (v instanceof org.objectweb.asm.tree.AnnotationNode) {
+                annotationClasses(((org.objectweb.asm.tree.AnnotationNode) v).values, queue);
+            }
+        }
+    }
+
+    /**
+     * A class whose classes(boolean) returns the given classes. TeaVM's Class.forName only finds classes that the
+     * program instantiates or otherwise reaches, and a class literal is not enough: with true (never passed) it
+     * would also instantiate the concrete ones, which makes the compiler keep them.
+     */
+    private byte[] reflectiveKeeper(java.util.Set<String> keep) {
+        org.objectweb.asm.ClassWriter cw = new org.objectweb.asm.ClassWriter(
+                org.objectweb.asm.ClassWriter.COMPUTE_MAXS | org.objectweb.asm.ClassWriter.COMPUTE_FRAMES) {
+            @Override
+            protected String getCommonSuperClass(String a, String b) {
+                return "java/lang/Object";
+            }
+        };
+        cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER, "teafabric/generated/Reflective",
+                null, "java/lang/Object", null);
+        for (String sink : new String[] {"Ljava/lang/Object;", "I", "J", "F", "D"}) {
+            cw.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "sink" + sink.charAt(0), sink, null, null).visitEnd();
+        }
+        java.util.List<String> all = new java.util.ArrayList<>(keep);
+        int chunk = 300;
+        int parts = (all.size() + chunk - 1) / chunk;
+        // classes(create): create(i) for each part (instantiating the concrete classes when create is true),
+        // then the array of all the classes
+        for (int part = 0; part < parts; part++) {
+            org.objectweb.asm.MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, "create" + part,
+                    "(Z)V", null, null);
+            mv.visitCode();
+            org.objectweb.asm.Label skip = new org.objectweb.asm.Label();
+            mv.visitVarInsn(Opcodes.ILOAD, 0);
+            mv.visitJumpInsn(Opcodes.IFEQ, skip);
+            for (String c : all.subList(part * chunk, Math.min(all.size(), (part + 1) * chunk))) {
+                byte[] bytes = classes.get(c);
+                if (bytes == null) {
+                    continue;
+                }
+                org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+                new org.objectweb.asm.ClassReader(bytes).accept(node, org.objectweb.asm.ClassReader.SKIP_CODE);
+                if ((node.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_INTERFACE)) != 0) {
+                    continue;
+                }
+                for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+                    if (m.name.equals("<init>") && m.desc.equals("()V")) {
+                        mv.visitTypeInsn(Opcodes.NEW, c);
+                        mv.visitInsn(Opcodes.DUP);
+                        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, c, "<init>", "()V", false);
+                        mv.visitInsn(Opcodes.POP);
+                        break;
+                    }
+                }
+            }
+            mv.visitLabel(skip);
+            mv.visitInsn(Opcodes.RETURN);
+            mv.visitMaxs(0, 0);
+            mv.visitEnd();
+            // lookup<part>(name)
+            org.objectweb.asm.MethodVisitor lk = cw.visitMethod(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, "lookup" + part,
+                    "(Ljava/lang/String;)Ljava/lang/Class;", null, null);
+            lk.visitCode();
+            for (String c : all.subList(part * chunk, Math.min(all.size(), (part + 1) * chunk))) {
+                org.objectweb.asm.Label next = new org.objectweb.asm.Label();
+                lk.visitLdcInsn(c.replace('/', '.'));
+                lk.visitVarInsn(Opcodes.ALOAD, 0);
+                lk.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "equals", "(Ljava/lang/Object;)Z", false);
+                lk.visitJumpInsn(Opcodes.IFEQ, next);
+                // Class.forName runs the static initialiser (Night Config's formats register themselves there);
+                // a class literal does not, reading a static field does.
+                // The value goes into a sink field: TeaVM removes a read whose value is unused, and with it the
+                // class initialisation that the read implies.
+                org.objectweb.asm.tree.FieldNode sf = staticField(c);
+                if (sf != null) {
+                    lk.visitFieldInsn(Opcodes.GETSTATIC, c, sf.name, sf.desc);
+                    String sink = sinkDescriptor(sf.desc);
+                    lk.visitFieldInsn(Opcodes.PUTSTATIC, "teafabric/generated/Reflective", "sink" + sink.charAt(0),
+                            sink);
+                }
+                lk.visitLdcInsn(org.objectweb.asm.Type.getObjectType(c));
+                lk.visitInsn(Opcodes.ARETURN);
+                lk.visitLabel(next);
+            }
+            lk.visitInsn(Opcodes.ACONST_NULL);
+            lk.visitInsn(Opcodes.ARETURN);
+            lk.visitMaxs(0, 0);
+            lk.visitEnd();
+        }
+        org.objectweb.asm.MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "classes",
+                "(Z)[Ljava/lang/Class;", null, null);
+        mv.visitCode();
+        for (int part = 0; part < parts; part++) {
+            mv.visitVarInsn(Opcodes.ILOAD, 0);
+            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "teafabric/generated/Reflective", "create" + part, "(Z)V", false);
+        }
+        mv.visitLdcInsn(all.size());
+        mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Class");
+        for (int i = 0; i < all.size(); i++) {
+            mv.visitInsn(Opcodes.DUP);
+            mv.visitLdcInsn(i);
+            mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(all.get(i)));
+            mv.visitInsn(Opcodes.AASTORE);
+        }
+        mv.visitInsn(Opcodes.ARETURN);
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
+        org.objectweb.asm.MethodVisitor lk = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "lookup",
+                "(Ljava/lang/String;)Ljava/lang/Class;", null, null);
+        lk.visitCode();
+        for (int part = 0; part < parts; part++) {
+            org.objectweb.asm.Label next = new org.objectweb.asm.Label();
+            lk.visitVarInsn(Opcodes.ALOAD, 0);
+            lk.visitMethodInsn(Opcodes.INVOKESTATIC, "teafabric/generated/Reflective", "lookup" + part,
+                    "(Ljava/lang/String;)Ljava/lang/Class;", false);
+            lk.visitInsn(Opcodes.DUP);
+            lk.visitJumpInsn(Opcodes.IFNULL, next);
+            lk.visitInsn(Opcodes.ARETURN);
+            lk.visitLabel(next);
+            lk.visitInsn(Opcodes.POP);
+        }
+        lk.visitInsn(Opcodes.ACONST_NULL);
+        lk.visitInsn(Opcodes.ARETURN);
+        lk.visitMaxs(0, 0);
+        lk.visitEnd();
+        cw.visitEnd();
+        return cw.toByteArray();
+    }
+
+    /** The sink field type for a value of the given field type (int for the small primitive types). */
+    private static String sinkDescriptor(String desc) {
+        switch (desc.charAt(0)) {
+            case 'Z': case 'B': case 'C': case 'S': case 'I':
+                return "I";
+            case 'J': case 'F': case 'D':
+                return desc;
+            default:
+                return "Ljava/lang/Object;";
+        }
+    }
+
+    /** A static field of a class that has a static initialiser (preferably not a constant), or null. */
+    private org.objectweb.asm.tree.FieldNode staticField(String c) {
+        byte[] b = classes.get(c);
+        if (b == null) {
+            return null;
+        }
+        org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+        new org.objectweb.asm.ClassReader(b).accept(node, org.objectweb.asm.ClassReader.SKIP_CODE);
+        boolean clinit = false;
+        for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+            clinit |= m.name.equals("<clinit>");
+        }
+        if (!clinit || (node.access & Opcodes.ACC_INTERFACE) != 0) {
+            return null;
+        }
+        org.objectweb.asm.tree.FieldNode constant = null;
+        for (org.objectweb.asm.tree.FieldNode f : node.fields) {
+            if ((f.access & Opcodes.ACC_STATIC) != 0) {
+                if (f.value == null) {
+                    return f;
+                }
+                constant = constant != null ? constant : f;
+            }
+        }
+        return constant;
+    }
+
+    /**
+     * Class names in string constants of classes that call Class.forName or ClassLoader.loadClass (REI loads its
+     * modules this way, Night Config its formats).
+     */
+    private java.util.Set<String> forNameStrings() {
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        byte[] forName = "forName".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] loadClass = "loadClass".getBytes(StandardCharsets.ISO_8859_1);
+        for (Map.Entry<String, byte[]> e : classes.entrySet()) {
+            String n = e.getKey();
+            if (n.startsWith("net/minecraft/") || n.startsWith("com/mojang/") || n.startsWith("java/")
+                    || n.startsWith("net/fabricmc/loader/") || n.startsWith("kotlinx/")
+                    || n.startsWith("com/chocohead/") // Manningham Mills (early risers: class transformers at launch)
+                    || n.startsWith("groovy") || n.startsWith("org/codehaus/") || n.startsWith("kotlin/")
+                    || n.startsWith("org/apache/") || n.startsWith("io/netty/") || n.startsWith("com/google/")) {
+                continue;
+            }
+            byte[] b = e.getValue();
+            if (!contains(b, forName) && !contains(b, loadClass)) {
+                continue;
+            }
+            org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+            new org.objectweb.asm.ClassReader(b).accept(node, 0);
+            boolean calls = false;
+            java.util.List<String> strings = new java.util.ArrayList<>();
+            for (org.objectweb.asm.tree.MethodNode m : node.methods) {
+                for (org.objectweb.asm.tree.AbstractInsnNode insn = m.instructions.getFirst(); insn != null;
+                        insn = insn.getNext()) {
+                    if (insn instanceof org.objectweb.asm.tree.MethodInsnNode) {
+                        org.objectweb.asm.tree.MethodInsnNode mi = (org.objectweb.asm.tree.MethodInsnNode) insn;
+                        if ((mi.owner.equals("java/lang/Class") && mi.name.equals("forName"))
+                                || (mi.owner.equals("java/lang/ClassLoader") && mi.name.equals("loadClass"))) {
+                            calls = true;
+                        }
+                    } else if (insn instanceof org.objectweb.asm.tree.LdcInsnNode
+                            && ((org.objectweb.asm.tree.LdcInsnNode) insn).cst instanceof String) {
+                        strings.add((String) ((org.objectweb.asm.tree.LdcInsnNode) insn).cst);
+                    }
+                }
+            }
+            if (!calls) {
+                continue;
+            }
+            for (String s : strings) {
+                String internal = s.replace('.', '/');
+                if (s.indexOf('.') > 0 && s.indexOf(' ') < 0 && s.indexOf('/') < 0 && classes.containsKey(internal)
+                        && !internal.startsWith("net/minecraft/") && !internal.startsWith("net/fabricmc/loader/")
+                        && !internal.startsWith("kotlin") && !internal.contains("/asm/")) {
+                    out.add(internal);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The first three package segments ("com/example/mod"): one mod's package tree. */
+    private static String packagePrefix(String c) {
+        String[] parts = c.split("/");
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < Math.min(3, parts.length - 1); i++) {
+            b.append(parts[i]).append('/');
+        }
+        return b.toString();
+    }
+
+    private static final String[] NOT_MOD = {"java/", "net/minecraft/", "com/mojang/", "com/google/", "it/unimi/",
+        "net/fabricmc/loader/", "com/llamalad7/", "groovy", "org/codehaus/", "org/objectweb/", "org/spongepowered/",
+        "kotlin", "org/apache/", "io/netty/", "com/viaversion/viaversion/bukkit/", "com/viaversion/viaversion/velocity/",
+        "com/viaversion/viaversion/bungee/", "com/viaversion/viaversion/sponge/"};
+
+    private boolean isModClass(String c) {
+        if (!classes.containsKey(c)) {
+            return false;
+        }
+        for (String p : NOT_MOD) {
+            if (c.startsWith(p)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean contains(byte[] bytes, byte[] part) {
+        outer:
+        for (int i = 0, n = bytes.length - part.length; i <= n; i++) {
+            for (int j = 0; j < part.length; j++) {
+                if (bytes[i + j] != part[j]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
     private static void customValue(StringBuilder sb, CustomValue v) {
         switch (v.getType()) {
             case OBJECT: {
@@ -471,6 +953,7 @@ public final class Baker implements PreLaunchEntrypoint {
             }
             case STRING:
                 sb.append(str(v.getAsString()));
+                CUSTOM_STRINGS.add(v.getAsString());
                 break;
             case NUMBER:
                 sb.append(v.getAsNumber());

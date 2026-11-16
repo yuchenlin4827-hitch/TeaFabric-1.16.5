@@ -33,9 +33,57 @@ public class TeaFabricReflection implements ReflectionSupplier {
                 || name.startsWith("com.mojang.");
     }
 
+    /** Classes the baker found named in mod metadata (META-INF/teafabric/reflective-classes.txt). */
+    private java.util.Set<String> named;
+    /** Config data classes ("data " lines): fields and constructors are reflective. */
+    private final java.util.Set<String> data = new java.util.HashSet<>();
+
+    private java.util.Set<String> named(ReflectionContext context) {
+        if (named == null) {
+            named = new java.util.HashSet<>();
+            try (java.io.InputStream in = context.getClassLoader()
+                    .getResourceAsStream("META-INF/teafabric/reflective-classes.txt")) {
+                if (in != null) {
+                    for (String line : new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                            .split("\n")) {
+                        String l = line.trim();
+                        if (l.startsWith("data ")) {
+                            l = l.substring(5);
+                            data.add(l);
+                        }
+                        if (!l.isEmpty()) {
+                            named.add(l);
+                        }
+                    }
+                }
+            } catch (java.io.IOException e) {
+                // none
+            }
+        }
+        return named;
+    }
+
     @Override
     public boolean isClassFoundByName(ReflectionContext context, String name) {
-        return findable(name);
+        // Classes mods load by name are found through the baker's lookup table (LangCompat.forName); making
+        // every mod class findable here linked all of them into the program.
+        return findable(name) || named(context).contains(name);
+    }
+
+    @Override
+    public Collection<String> getAccessibleFields(ReflectionContext context, String className) {
+        named(context);
+        if (!data.contains(className)) {
+            return Collections.emptyList();
+        }
+        ClassReader cls = context.getClassSource().get(className);
+        Collection<String> fields = new ArrayList<>();
+        if (cls != null) {
+            for (org.teavm.model.FieldReader f : cls.getFields()) {
+                fields.add(f.getName());
+            }
+        }
+        return fields;
     }
 
     @Override
@@ -43,6 +91,18 @@ public class TeaFabricReflection implements ReflectionSupplier {
         if (className.equals("io.netty.channel.ChannelInitializer")) {
             // Protocol translators (ViaVersion's ViaChannelInitializer) look it up in a static initialiser.
             return Collections.singletonList(MethodDescriptor.parse("initChannel(Lio/netty/channel/Channel;)V"));
+        }
+        if (named(context).contains(className)) {
+            ClassReader cls = context.getClassSource().get(className);
+            Collection<MethodDescriptor> ctors = new ArrayList<>();
+            if (cls != null) {
+                for (MethodReader method : cls.getMethods()) {
+                    if (method.getName().equals("<init>")) {
+                        ctors.add(method.getDescriptor());
+                    }
+                }
+            }
+            return ctors;
         }
         if (!className.startsWith("net.minecraft.")) {
             return Collections.emptyList();

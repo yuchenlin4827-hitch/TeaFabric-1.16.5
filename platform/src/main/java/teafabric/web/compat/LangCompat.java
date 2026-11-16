@@ -20,6 +20,35 @@ public final class LangCompat {
     private LangCompat() {
     }
 
+    // ---- LWJGL
+
+    /**
+     * PointerBuffer.flip() as compiled against LWJGL, where PointerBuffer extends CustomBuffer and flip() returns
+     * CustomBuffer (Iris' file dialog); the platform's PointerBuffer is a standalone class.
+     */
+    public static org.lwjgl.system.CustomBuffer<?> flip(org.lwjgl.PointerBuffer buffer) {
+        buffer.flip();
+        return null;
+    }
+
+    // ---- BitSet
+
+    /**
+     * {@code BitSet.stream()}. TeaVM's version does not advance when a lazy consumer (flatMap, iterator)
+     * takes one element and pauses: every pull returns the same bit again, so the stream never ends.
+     * Lithium's point-of-interest search streams a BitSet into flatMap; a bee looking for a hive collected
+     * the same nests until the array overflowed, freezing the page for minutes. The bits are taken now
+     * (the JDK binds them at the terminal operation; nothing here changes a BitSet in between).
+     */
+    public static java.util.stream.IntStream stream(java.util.BitSet bits) {
+        int[] values = new int[bits.cardinality()];
+        int n = 0;
+        for (int i = bits.nextSetBit(0); i >= 0 && n < values.length; i = bits.nextSetBit(i + 1)) {
+            values[n++] = i;
+        }
+        return java.util.Arrays.stream(values, 0, n);
+    }
+
     // ---- System / Runtime
 
     /** There is no process to exit; stop the game loop and tell the page. */
@@ -213,5 +242,145 @@ public final class LangCompat {
 
     /** {@code Thread.setContextClassLoader}: there are no class loaders; accepted and ignored. */
     public static void setContextClassLoader(Thread thread, ClassLoader loader) {
+    }
+
+    /** java.awt.Color.RGBtoHSB, as in the JDK (Mouse Wheelie sorts items by colour). */
+    public static float[] RGBtoHSB(int r, int g, int b, float[] hsb) {
+        if (hsb == null) {
+            hsb = new float[3];
+        }
+        int max = Math.max(r, Math.max(g, b));
+        int min = Math.min(r, Math.min(g, b));
+        float brightness = max / 255.0f;
+        float saturation = max != 0 ? (float) (max - min) / max : 0;
+        float hue;
+        if (saturation == 0) {
+            hue = 0;
+        } else {
+            float span = max - min;
+            float redc = (max - r) / span;
+            float greenc = (max - g) / span;
+            float bluec = (max - b) / span;
+            if (r == max) {
+                hue = bluec - greenc;
+            } else if (g == max) {
+                hue = 2.0f + redc - bluec;
+            } else {
+                hue = 4.0f + greenc - redc;
+            }
+            hue = hue / 6.0f;
+            if (hue < 0) {
+                hue = hue + 1.0f;
+            }
+        }
+        hsb[0] = hue;
+        hsb[1] = saturation;
+        hsb[2] = brightness;
+        return hsb;
+    }
+
+    /** Package versions come from jar manifests, which compiled classes do not have. */
+    public static String getSpecificationVersion(Package pkg) {
+        return null;
+    }
+
+    public static String getImplementationVersion(Package pkg) {
+        return null;
+    }
+
+    public static String getImplementationTitle(Package pkg) {
+        return null;
+    }
+
+    /** Properties.store(Writer, String), in the JDK's format (Fabrishot's config). */
+    public static void store(java.util.Properties props, java.io.Writer writer, String comments)
+            throws java.io.IOException {
+        StringBuilder out = new StringBuilder();
+        if (comments != null) {
+            out.append('#').append(comments.replace("\n", "\n#")).append('\n');
+        }
+        out.append('#').append(new Date()).append('\n');
+        for (String key : props.stringPropertyNames()) {
+            escape(out, key, true);
+            out.append('=');
+            escape(out, props.getProperty(key), false);
+            out.append('\n');
+        }
+        writer.write(out.toString());
+        writer.flush();
+    }
+
+    /**
+     * Properties.store(OutputStream, String): ISO 8859-1 with \\uXXXX escapes, as in the JDK (TeaVM's version asks
+     * for the charset by a name it does not know; Indigo and Indium store their settings this way).
+     */
+    public static void store(java.util.Properties props, java.io.OutputStream out, String comments)
+            throws java.io.IOException {
+        java.io.StringWriter w = new java.io.StringWriter();
+        store(props, w, comments);
+        String text = w.toString();
+        byte[] bytes = new byte[text.length() * 6];
+        int n = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c < 0x100) {
+                bytes[n++] = (byte) c;
+            } else {
+                String hex = Integer.toHexString(c);
+                bytes[n++] = '\\';
+                bytes[n++] = 'u';
+                for (int k = hex.length(); k < 4; k++) {
+                    bytes[n++] = '0';
+                }
+                for (int k = 0; k < hex.length(); k++) {
+                    bytes[n++] = (byte) Character.toUpperCase(hex.charAt(k));
+                }
+            }
+        }
+        out.write(bytes, 0, n);
+        out.flush();
+    }
+
+    private static void escape(StringBuilder out, String s, boolean key) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': out.append("\\\\"); break;
+                case '\t': out.append("\\t"); break;
+                case '\n': out.append("\\n"); break;
+                case '\r': out.append("\\r"); break;
+                case '\f': out.append("\\f"); break;
+                case '=': case ':': case '#': case '!':
+                    out.append('\\').append(c);
+                    break;
+                case ' ':
+                    if (key || i == 0) {
+                        out.append('\\');
+                    }
+                    out.append(c);
+                    break;
+                default:
+                    out.append(c);
+            }
+        }
+    }
+
+    /**
+     * Class.forName: first the classes the baker found that mods load by name (WTHIT's plugins, REI's modules,
+     * Night Config's formats, config validators), then TeaVM's own table.
+     */
+    public static Class<?> forName(String name) throws ClassNotFoundException {
+        Class<?> c = teafabric.generated.Reflective.lookup(name);
+        return c != null ? c : Class.forName(name);
+    }
+
+    public static Class<?> forName(String name, boolean initialize, ClassLoader loader) throws ClassNotFoundException {
+        Class<?> c = teafabric.generated.Reflective.lookup(name);
+        return c != null ? c : Class.forName(name, initialize, loader);
+    }
+
+    /** parallelStream: one thread here, so the sequential stream (REI filters its entry list this way). */
+    public static <T> java.util.stream.Stream<T> parallelStream(java.util.Collection<T> c) {
+        return c.stream();
     }
 }

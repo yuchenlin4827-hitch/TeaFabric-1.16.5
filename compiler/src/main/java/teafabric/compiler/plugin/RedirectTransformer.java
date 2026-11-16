@@ -98,6 +98,7 @@ public class RedirectTransformer implements ClassHolderTransformer {
 
     @Override
     public void transformClass(ClassHolder cls, ClassHolderTransformerContext context) {
+        plainGenericTypes(cls);
         for (String prefix : excluded) {
             if (cls.getName().startsWith(prefix)) {
                 return;
@@ -123,8 +124,42 @@ public class RedirectTransformer implements ClassHolderTransformer {
         }
     }
 
-    /** A JNI native: no TeaVM interop / generator / JSO annotation on it. */
+    /**
+     * TeaVM 0.16 fails to generate field reflection data for a field that has runtime annotations but no generic
+     * signature (NullPointerException in ReflectionMetadataGenerator.generateGenericType); AutoConfig's config
+     * fields are like that. Such fields get their plain type as generic type.
+     */
+    private static void plainGenericTypes(ClassHolder cls) {
+        for (org.teavm.model.FieldHolder f : cls.getFields()) {
+            if (f.getGenericType() != null || !f.getAnnotations().all().iterator().hasNext()) {
+                continue;
+            }
+            try {
+                f.setGenericType(org.teavm.model.GenericValueType.parse(descriptor(f.getType()),
+                        new org.teavm.model.GenericValueType.ParsePosition()));
+            } catch (RuntimeException e) {
+                // leave it; the field then has no reflection data problem only if it is not reflective
+            }
+        }
+    }
+
+    private static String descriptor(org.teavm.model.ValueType t) {
+        if (t instanceof org.teavm.model.ValueType.Object) {
+            return "L" + ((org.teavm.model.ValueType.Object) t).getClassName().replace('.', '/') + ";";
+        }
+        if (t instanceof org.teavm.model.ValueType.Array) {
+            return "[" + descriptor(((org.teavm.model.ValueType.Array) t).getItemType());
+        }
+        return t.toString(); // primitives: Z, I, J, ...
+    }
+
+    /** A JNI native: no TeaVM interop / generator / JSO annotation on it, and not in a class TeaVM generated. */
     private static boolean isPlainJni(MethodHolder method) {
+        // Annotation values: TeaVM's annotation support declares them as natives of "<Annotation>$$_nativeData"
+        // and its backend supplies them (Cloth Config's AutoConfig reads @Config(name = ...)).
+        if (method.getOwnerName().contains("$$_")) {
+            return false;
+        }
         for (org.teavm.model.AnnotationHolder a : method.getAnnotations().all()) {
             String name = a.getType();
             if (name.startsWith("org.teavm.")) {

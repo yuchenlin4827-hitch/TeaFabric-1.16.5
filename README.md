@@ -9,6 +9,9 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 > 「JIT」指的是固定管線 OpenGL 的著色器即時特化：遊戲每使用一種新的 GL 狀態組合，就即時產生並編譯一支專用的
 > GLSL ES 3.00 程式並快取。目前狀態：在 Chromium 153 / Chrome 157 中可完整啟動到 **Minecraft 標題畫面**
 > （全景背景、Logo、閃爍標語與按鈕，滑鼠可操作），並可玩單人遊戲（世界存在瀏覽器裡）與多人連線，有音效與背景音樂，可切換語言（含繁體/簡體中文）。
+> 已移植 Fabulously Optimized 1.12.3（1.16.5 最後一版）的全部模組，以及 REI、WTHIT、AppleSkin、Mouse Wheelie、
+> BetterF3、ShulkerBoxTooltip 等介面/輔助模組；Iris 光影包可以用（在世界裡按 O，把光影包 zip 拖進頁面，MakeUp
+> Ultra Fast 已實測可正常顯示）。
 > 詳見下方「Status」。
 
 ## 線上體驗 / Try it
@@ -351,6 +354,133 @@ What does work without a rebuild:
 Rebuilding after adding jars to `./mods` takes about 15–25 minutes (bake + TeaVM + packaging), and
 the result is a new static `build/web` directory to serve.
 
+### Optimization mods
+
+Sodium 0.2.0, Lithium 0.6.6, Phosphor 0.8.0 and FerriteCore 2.1.1 (the 1.16.5 jars, in `./mods`) run in
+the browser build. Each relied on something a browser build does not have; the build adapts them
+automatically, and only when the mod is present (`baker/.../ModCompat.java` rewrites the few methods
+involved while baking; `SodiumCompat` and the WebGL emulation do the rest):
+
+* **FerriteCore** defines two classes inside Guava's package at run time and calls through method handles
+  (its compact block state property map, the block state cache); its config reaches its file handler
+  through reflection. The classes are defined at build time and the calls are direct.
+* **Lithium**: its initializer checked a config that its mixin plugin (which runs at build time here) fills;
+  that check is dropped. It asks entity classes whether they override two collision methods
+  (`getDeclaredMethod`); those methods keep reflection metadata (`TeaFabricReflection`). Its
+  point-of-interest search streams a `BitSet` into `flatMap`, which exposed a TeaVM bug: `BitSet.stream()`
+  repeated its current bit forever under a lazy consumer, so a bee looking for a hive collected the same
+  nests until the array overflowed and the page froze for minutes. `BitSet.stream` is redirected to a
+  correct version (`LangCompat`).
+* **Phosphor** uses `StampedLock`, which TeaVM's class library lacks: added for green threads
+  (`compiler/src/runtime`).
+* **Sodium** renders with its *Oneshot* backend (one draw per chunk section; its multi-draw backend needs
+  OpenGL 4.3 indirect draws, which WebGL 2 does not have) through the emulation's vertex array objects.
+  Its chunk meshing runs on one worker green thread that lets the page draw a frame every 6 ms (with a
+  thread per core, all sharing the page's one thread, no frame was drawn until every chunk was built).
+  WebGL has no alpha test, so the GLSL translator adds it to every fragment shader (leaves, grass and
+  flowers had solid backgrounds); fog and other state Sodium reads back from GL is answered by the
+  emulation; its video settings no longer offer Fabulous!; its F3 memory line shows the JavaScript heap.
+  Sodium finds no `sun.misc.Unsafe` and uses its NIO vertex writers.
+* **World generation** runs on Minecraft's worker pool, which is green threads here. With Lithium, a task
+  sometimes waited for a task queued behind it on the same thread, and about one new world in six stopped
+  at "Preparing spawn area" for good (both the worker and the server thread waiting in `CompletableFuture`,
+  found with `?waits`). Every untimed wait in the concurrency shims reports to the pool, which starts
+  another thread (up to 8) when all of its threads wait inside tasks while tasks are queued, as a JVM's
+  pool would have a free thread. In 12 new worlds afterwards, all were ready in 22–28 s; the extra thread
+  was needed in 3 of them.
+
+Measured in headless Chromium with software rendering (SwiftShader), the same build with and without the
+four mods, a new random world each run:
+
+* a new world was ready 22–24 s after Create World with the mods, 39–47 s without;
+* WebGL calls per frame a minute into the world: 924 instead of 1,495. Sodium updates animated textures
+  only while they are visible (texSubImage2D 458 per frame to none); its per-chunk draws set their
+  attribute pointers each time (vertexAttribPointer 175 to 212);
+* JavaScript heap a minute in: 420–444 MB with the mods, 466–498 MB without (FerriteCore);
+* frame rate a minute in: 3–10 fps with the mods, 4–9 fps without, no difference these runs can show:
+  software rendering draws the pixels on the CPU, and the random worlds differ more than the builds. On a
+  real GPU the saved WebGL calls and texture uploads should count for more; that was not measured.
+
+**Iris (shader packs) works** with packs written for desktop OpenGL. In a world, press O (Iris' Shader Packs
+screen), drop the pack's `.zip` onto the page, select it and press Apply or Done; packs are kept in browser storage
+like worlds. Tested in headless Chromium with software rendering (SwiftShader):
+
+* **MakeUp Ultra Fast** renders: shader lighting and colour grading, fog, sun haze, translucent leaves, with the
+  HUD, WTHIT and AppleSkin on top.
+* **BSL** (HIGH profile) loads, all of its programs (shadow, 15 gbuffers, deferred, 7 composite, final) translate
+  and link, and a frame is drawn into Minecraft's main framebuffer (checked by reading its pixels back), but the
+  software-rendering test browser then ran out of memory (7 GB) and was killed. Not tested on a real GPU.
+
+What it took:
+
+* **A GLSL translator** (`platform/.../gl/glsl`): packs are written in compatibility-profile GLSL (1.10–1.50:
+  `gl_Vertex`, `gl_ModelViewMatrix`, `gl_FragData`, `texture2D`, `shadow2D`, `ftransform`, built-in fog), WebGL 2
+  runs GLSL ES 3.00. A preprocessor, parser and type checker (with GLSL's implicit int-to-float conversions)
+  rewrite each shader: built-ins become `tf_*` inputs and uniforms that the emulation fills from its fixed-function
+  state (matrices, client arrays, current colour and texture coordinates, fog), names GLSL ES reserves are
+  renamed, global initialisers that are not constant move into `main`, the fixed-function alpha test is added, and
+  varyings a fragment shader reads but its vertex shader does not write are declared when the program is linked.
+  In an offline test it translates every program of four packs (BSL, MakeUp Ultra Fast, Mellow, Miniature Shader).
+* **WebGL rules desktop GL does not have**, handled by the emulation: draw buffers the fragment shader has no
+  output for are masked per draw (WebGL refuses the draw); depth copies (`glCopyTexImage2D` of depth, blits
+  between depth formats) are framebuffer blits in matching formats; depth textures sample with NEAREST unless
+  compare mode is on; a texture unit enabled with no texture bound is off, as in desktop GL (Iris unbinds every
+  unit after its passes while one stays enabled, which turned the HUD and the whole screen black); depth cannot be
+  read back, so Iris' centre depth (the focus of depth of field) is the far plane.
+* **Java side**: `\R` in regular expressions (Iris splits pack files with it) and `\h` are spelled out for
+  TeaVM's regex engine; JOML (in Iris) uses a plain number format (TeaVM's DecimalFormat rejects its pattern);
+  the constants Iris adds to Sodium's enums at run time (a geometry shader type, vertex attributes) are made enum
+  fields at build time, since TeaVM sizes `EnumMap` from an enum's fields (creating a world failed).
+
+Not supported: packs that need geometry shaders (WebGL 2 has none), and shader packs are heavy for a browser
+page (the world is drawn a second time for the shadow map, then a series of full-screen passes); under software
+rendering a frame with MakeUp took seconds. The WebGPU renderer (`?webgpu`, see Status) is not used for shader
+packs yet.
+
+### Fabulously Optimized and UI/helper mods
+
+`scripts/get-mods.sh` puts the mods of Fabulously Optimized 1.12.3 (its last pack for 1.16.5) and a set of
+UI and helper mods into `./mods` (list in `mods/README.md`). What they needed, besides what the
+optimization mods above needed (all in `ModCompat`, `ArchitecturyEvents`, the class library and the compiler
+plugin, applied only when the mod is present):
+
+* **Architectury** (used by Cloth Config, BetterF3, Not Enough Crashes, REI): its
+  `@ExpectPlatform` methods are invokedynamic calls with a bootstrap method that finds the Fabric
+  implementation by name; they become direct calls. Its events build their invokers with
+  `java.lang.reflect.Proxy` and call listeners through `MethodHandles`; for each of the 81 event interfaces
+  the mods use, the baker generates the invoker class instead (same rules: a PASS result continues, any
+  other result is returned), and the 100 call sites use it.
+* **Not Enough Crashes** installs its platform layer and Smooth Boot reads its config from mixins injected
+  at the head of Minecraft's `Main.main`, which the browser build does not go through: the injections are
+  collected into a generated `MainHooks` that the launcher runs first. Its start-up downloads Yarn
+  mappings, rewrites log events and installs a SecurityManager; those are skipped.
+* **Configs** (AutoConfig, Gson, Jankson): the classes they fill by reflection (ConfigData implementations,
+  classes passed to `fromJson`, and the classes of their fields) keep reflective fields and constructors
+  (128 classes). TeaVM 0.16 could not generate reflection data for a field with annotations but no generic
+  signature (AutoConfig's fields); the compiler plugin gives such fields their plain type. Annotation values
+  (`@Config(name = ...)`) were broken by the plugin's own JNI stubbing, which now leaves TeaVM's generated
+  annotation classes alone.
+* **Classes loaded by name**: WTHIT creates its plugins from class names in `fabric.mod.json` and REI loads its
+  modules with `Class.forName("...")`. The baker collects such names (custom metadata, string constants of
+  classes that call `Class.forName`) into a generated lookup that `Class.forName` consults first, and keeps
+  those classes and their constructors in the build. Night Config (in LambDynamicLights and LambdaBetterGrass)
+  loads its file formats that way only to run their static initialisers, which register the file extension;
+  its format detector registers them directly instead, and its file watcher (configs that reload when the file
+  changes) watches nothing.
+* Relative paths are relative to the game directory (`user.dir` and the file system's working directory),
+  as with a desktop launcher (Entity Culling, Smooth Boot write `config/` that way). TeaVM's `java.nio.file`
+  looked relative paths up from the root, so `Paths.get` / `Path.of` make them absolute there.
+* Smaller ones: amecs' key binding map (in Mouse Wheelie; reflection on a mixin-added method) is a direct
+  call; ShulkerBoxTooltip skips the validation of its config file (validators created by reflection); Dynamic FPS reads page focus and
+  visibility through `glfwGetWindowAttrib`; Borderless Mining's undecorated window is the browser's full
+  screen; WTHIT gets `java.awt.Rectangle`/`Dimension`, Mouse Wheelie `Color.RGBtoHSB`, BetterF3 a garbage
+  collector bean, Iris's shader preprocessor an SLF4J binding to Log4j.
+* A mod entrypoint that fails is logged and the game continues with the others (Fabric Loader would throw
+  after the stage, and Not Enough Crashes then skipped every later stage).
+
+Light Overlay was tried and left out: it calls its own Fabric code through `MethodHandles` looked up with
+class names built at run time.
+
 ### Server protocol: 1.12.2 / 1.16.5 (ViaFabric)
 
 With [ViaFabric](https://modrinth.com/mod/viafabric) 0.4.x (it includes ViaVersion) in `./mods`, the
@@ -429,6 +559,15 @@ Not working yet / known issues:
 * Lighter video settings for the browser (`WebDefaults`): once per player, options still at vanilla's
   default become render distance 6, biome blend 3×3, mipmap levels 2, fast clouds and decreased
   particles; options a player changed are kept.
-* WebGPU: not used. A CPU profile of a world shows the time in Minecraft's own code and the browser, not
-  in the GL emulation (0.3%), so a WebGPU backend would not make the game itself faster, and the slow
-  devices this is played on often have no WebGPU at all.
+* WebGPU (`?webgpu` in the page address; WebGL 2 stays the default): `web/webgpu/webgpu-gl.js` implements the
+  WebGL 2 calls the GL emulation makes on WebGPU, so the game itself is unchanged. Shaders are converted when
+  a program is linked, GLSL ES 3.00 to Vulkan-style GLSL (`glsl-vk.js`) and then to WGSL by naga, the shader
+  translator of wgpu (`web/webgpu/naga`, from the naga-wasm package, MIT/Apache-2.0); all 17 programs the game
+  and Sodium use convert. OpenGL's conventions are kept (clip depth, bottom-up rows in render targets,
+  integer attributes, triangle fans), streamed vertices and uniforms go to per-submit buffers, and a frame is
+  submitted when the game swaps buffers. The title screen and singleplayer worlds with Sodium render as with
+  WebGL (tested in headless Chromium with SwiftShader, locally and on the Cloudflare site). Frame rates under
+  software rendering were the same within noise (5.7 and 3.7 fps with WebGL, 5.4 and 2.3 with WebGPU): the
+  time goes to Minecraft's own code, not to the graphics API. Not supported yet: readPixels (screenshots and
+  the world icon come back black), stencil, clears limited by a scissor. WebGPU matters for shader packs,
+  which can use compute shaders and image load/store that WebGL 2 lacks.
