@@ -360,6 +360,14 @@
     },
     addFile: function (path, data) { this.files.push([path, data]); },
     takeStatus: function () { return this.statuses.length ? this.statuses.shift() : null; },
+    incoming: [],
+    takenFile: null,
+    takeFile: function () {
+      const f = this.incoming.shift();
+      if (!f) return null;
+      this.takenFile = new Int8Array(f.bytes);
+      return f.path;
+    },
     receive: function (m) {
       switch (m.t) {
         case 'log': {
@@ -369,6 +377,9 @@
         }
         case 'status':
           this.statuses.push(m.json);
+          break;
+        case 'file':
+          this.incoming.push(m);
           break;
         case 'data': {
           const s = sockets[m.id];

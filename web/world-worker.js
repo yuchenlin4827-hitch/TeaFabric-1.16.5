@@ -106,7 +106,11 @@ tf.host = {
     this.files = c.files || [];
     return c.json;
   },
-  post: function (json) { self.postMessage({ t: 'status', json: json }); }
+  post: function (json) { self.postMessage({ t: 'status', json: json }); },
+  postFile: function (path, data) {
+    const copy = data.slice();
+    self.postMessage({ t: 'file', path: path, bytes: copy.buffer }, [copy.buffer]);
+  }
 };
 tf.exit = function () {};
 tf.fetchAsset = function () { return 0; };

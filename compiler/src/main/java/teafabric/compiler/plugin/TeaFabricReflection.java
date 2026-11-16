@@ -72,6 +72,12 @@ public class TeaFabricReflection implements ReflectionSupplier {
 
     @Override
     public Collection<String> getAccessibleFields(ReflectionContext context, String className) {
+        if (className.equals("com.google.gson.stream.JsonReader")) {
+            // Text.Serializer reads the reader's position through these two private fields; without them its
+            // static initialiser threw, and the first JSON text parsed after start-up failed (the vanilla pack's
+            // pack.mcmeta: "Broken/missing pack.mcmeta", and in the world worker no vanilla data pack at all).
+            return java.util.Arrays.asList("pos", "lineStart");
+        }
         named(context);
         if (!data.contains(className)) {
             return Collections.emptyList();

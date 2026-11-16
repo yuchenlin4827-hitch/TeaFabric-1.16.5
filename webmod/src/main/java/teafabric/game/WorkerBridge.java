@@ -31,6 +31,17 @@ public final class WorkerBridge {
         addFile(path, Int8Array.copyFromJavaArray(data));
     }
 
+    /** A file the worker sent (its path relative to the game directory), or null; then {@link #takenFileData()}. */
+    @JSBody(script = "return teafabric.worker.takeFile();")
+    public static native String takeFile();
+
+    @JSBody(script = "return teafabric.worker.takenFile;")
+    private static native Int8Array takenFileData0();
+
+    public static byte[] takenFileData() {
+        return takenFileData0().copyToJavaArray();
+    }
+
     /** The worker's latest status message (JSON), or null when none arrived since the last take. */
     @JSBody(script = "return teafabric.worker.takeStatus();")
     public static native String takeStatus();
@@ -52,6 +63,14 @@ public final class WorkerBridge {
 
     public static byte[] fileData(int i) {
         return fileData0(i).copyToJavaArray();
+    }
+
+    @JSBody(params = {"path", "data"}, script = "teafabric.host.postFile(path, data);")
+    private static native void postFile(String path, Int8Array data);
+
+    /** Sends a file (path relative to the game directory) to the page's file system. */
+    public static void postFile(String path, byte[] data) {
+        postFile(path, Int8Array.copyFromJavaArray(data));
     }
 
     /** Sends a status message (JSON) to the page. */

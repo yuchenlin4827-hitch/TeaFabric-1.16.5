@@ -119,6 +119,17 @@ public final class WorkerWorlds {
 
     /** Every client tick: pause and view distance to the worker, the end of a worker world. */
     public static void tick(MinecraftClient client) {
+        String path;
+        while ((path = WorkerBridge.takeFile()) != null) {
+            // level.dat of a world the worker created or saved: for the world list (the worker keeps the world)
+            File f = new File(client.runDirectory, path);
+            try {
+                f.getParentFile().mkdirs();
+                Files.write(f.toPath(), WorkerBridge.takenFileData());
+            } catch (IOException e) {
+                LOGGER.warn("Could not write {} from the world worker", path, e);
+            }
+        }
         if (!active) {
             return;
         }

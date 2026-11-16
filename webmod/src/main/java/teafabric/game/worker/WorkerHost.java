@@ -65,6 +65,25 @@ public final class WorkerHost {
     private static WorkerServer server;
     private static boolean announcedReady;
     private static long lastProgressPost;
+    /** The folder of the world running (or last run). */
+    private static String currentWorld;
+
+    /** The world's level.dat to the page (its world list reads it; the worker keeps the world's files). */
+    private static void sendLevelDat() {
+        if (currentWorld == null) {
+            return;
+        }
+        File f = new File(new File(new File(System.getProperty("user.dir", "/minecraft"), "saves"), currentWorld),
+                "level.dat");
+        try {
+            if (f.isFile()) {
+                WorkerBridge.postFile("saves/" + currentWorld + "/level.dat", Files.readAllBytes(f.toPath()));
+            }
+        } catch (java.io.IOException e) {
+            LOGGER.warn("Could not send level.dat to the page", e);
+        }
+    }
+
     /** A start that arrived while the previous world was still saving, with its files. */
     private static JsonObject deferredStart;
     private static java.util.List<Object[]> deferredFiles;
@@ -124,6 +143,7 @@ public final class WorkerHost {
         if (s.isStopped()) {
             server = null;
             LOGGER.info("World stopped");
+            sendLevelDat(); // saved when the world stopped: the page's world list shows it
             status("stopped");
             if (deferredStart != null) {
                 JsonObject msg = deferredStart;
@@ -214,6 +234,8 @@ public final class WorkerHost {
             }
         }
         session.backupLevelDataFile(registry, properties);
+        currentWorld = dir;
+        sendLevelDat();
         resources.loadRegistryTags();
 
         YggdrasilAuthenticationService auth = new YggdrasilAuthenticationService(Proxy.NO_PROXY);
