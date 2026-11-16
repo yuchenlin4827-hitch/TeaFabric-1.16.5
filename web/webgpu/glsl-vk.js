@@ -188,6 +188,10 @@
     }
     // keep each 'other' declaration once (a declarator list was pushed per name)
     st.other = st.other.filter((t, i, a) => a.indexOf(t) === i);
+    // samplers the code never uses are left out, as WebGL does (shader packs declare dozens in shared headers,
+    // more than WebGPU's 16 textures per stage; and a declared one may name a texture the pass draws into)
+    const code = st.other.join('\n');
+    st.samplers = st.samplers.filter((sm) => new RegExp('\\b' + sm.name + '\\b').test(code));
     return st;
   }
 
@@ -199,6 +203,25 @@
       if (m) return +m[1];
     }
     return 1;
+  }
+
+  /**
+   * How a varying crosses between stages: one part (itself), or for a matrix its columns and for an array its
+   * elements ({expr, type, split}).
+   */
+  function varyingParts(o, defines) {
+    const m = /^mat([234])(?:x([234]))?$/.exec(o.type);
+    const count = o.array != null ? arrayLength(o.array, defines) : 0;
+    const elems = o.array != null ? Array.from({ length: count }, (x, i) => o.name + '[' + i + ']') : [o.name];
+    if (m) {
+      const cols = +m[1];
+      const rows = m[2] ? +m[2] : cols;
+      const out = [];
+      for (const e of elems) for (let c = 0; c < cols; c++) out.push({ expr: e + '[' + c + ']', type: 'vec' + rows, split: true });
+      return out;
+    }
+    if (o.array != null) return elems.map((e) => ({ expr: e, type: o.type, split: true }));
+    return [{ expr: o.name, type: o.type, split: false }];
   }
 
   /** Lays out the shared uniform block. */
@@ -226,6 +249,131 @@
 
   function replaceIdent(code, name, by) {
     return code.replace(new RegExp('\\b' + name + '\\b', 'g'), by);
+  }
+
+  /** Index of the parenthesis that closes the one at open (-1 if unbalanced). */
+  function closing(code, open) {
+    let depth = 0;
+    for (let i = open; i < code.length; i++) {
+      const c = code[i];
+      if (c === '(') depth++;
+      else if (c === ')' && --depth === 0) return i;
+    }
+    return -1;
+  }
+
+  /** Splits a call's argument text at top-level commas. */
+  function splitArgs(text) {
+    const out = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (c === '(' || c === '[') depth++;
+      else if (c === ')' || c === ']') depth--;
+      else if (c === ',' && depth === 0) {
+        out.push(text.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    if (text.trim()) out.push(text.slice(start).trim());
+    return out;
+  }
+
+  /** Rewrites every call of name in code with fn(args) (fn returns the replacement or null to keep it). */
+  function rewriteCalls(code, name, fn) {
+    const re = new RegExp('\\b' + name + '\\s*\\(', 'g');
+    let out = '';
+    let last = 0;
+    let m;
+    while ((m = re.exec(code))) {
+      const open = m.index + m[0].length - 1;
+      const close = closing(code, open);
+      if (close < 0) break;
+      const by = fn(splitArgs(code.slice(open + 1, close)));
+      if (by == null) continue;
+      out += code.slice(last, m.index) + by;
+      last = close + 1;
+      re.lastIndex = close + 1;
+    }
+    return out + code.slice(last);
+  }
+
+  const FUNC = /^([\s\S]*?)\b(\w+)\s*\(([^)]*)\)\s*\{([\s\S]*)\}$/;
+
+  /**
+   * Functions with sampler parameters (shader packs pass textures to helper functions) are specialised for the
+   * samplers they are called with: naga's GLSL front end does not accept opaque types as parameters. Each call
+   * f(p, noisetex) becomes f__noisetex(p), a copy of f whose parameter is the uniform itself (GLSL ES only
+   * passes uniform samplers, and has no recursion). Unused ones are dropped.
+   */
+  function specializeSamplerParams(items) {
+    const funcs = {}; // name/arity -> {item, head, name, params, samplerAt, body, specs: Map}
+    items.forEach((text, index) => {
+      const m = FUNC.exec(text.trim());
+      if (!m) return;
+      const params = m[3].trim() === '' || m[3].trim() === 'void' ? [] : m[3].split(',').map((p) => p.trim());
+      const samplerAt = [];
+      params.forEach((p, i) => {
+        const words = p.replace(/\[.*$/, '').split(/\s+/);
+        const pname = words[words.length - 1];
+        const ptype = words[words.length - 2];
+        if (SAMPLER_TYPES[ptype]) samplerAt.push({ i, name: pname });
+      });
+      if (!samplerAt.length) return;
+      funcs[m[2] + '/' + params.length] = { index, head: m[1], name: m[2], params, samplerAt, body: m[4], specs: new Map() };
+    });
+    const names = Object.keys(funcs);
+    if (!names.length) return items;
+    const byName = {};
+    for (const k of names) (byName[funcs[k].name] = byName[funcs[k].name] || []).push(funcs[k]);
+    const rewrite = (code) => {
+      for (const fname of Object.keys(byName)) {
+        code = rewriteCalls(code, fname, (args) => {
+          const f = byName[fname].find((x) => x.params.length === args.length);
+          if (!f) return null;
+          const samplers = f.samplerAt.map((s) => args[s.i]);
+          if (samplers.some((a) => !/^\w+$/.test(a))) throw new Error('sampler argument is not a uniform: ' + samplers.join(', '));
+          const key = samplers.join('_');
+          const sname = f.name + '__' + key;
+          if (!f.specs.has(key)) {
+            f.specs.set(key, null); // being generated
+            let body = f.body;
+            f.samplerAt.forEach((s, j) => { body = replaceIdent(body, s.name, samplers[j]); });
+            const kept = f.params.filter((p, i) => !f.samplerAt.some((s) => s.i === i));
+            f.specs.set(key, f.head + sname + '(' + kept.join(', ') + ') {' + rewrite(body) + '}');
+          }
+          const rest = args.filter((a, i) => !f.samplerAt.some((s) => s.i === i));
+          return sname + '(' + rest.join(', ') + ')';
+        });
+      }
+      return code;
+    };
+    const rewritten = items.map((text, index) => {
+      if (names.some((k) => funcs[k].index === index)) return null;
+      // prototypes of the specialised functions go away with them
+      const proto = /^[\w\s]*?\b(\w+)\s*\(([^)]*)\)\s*;$/.exec(text.trim());
+      if (proto && byName[proto[1]] && SAMPLER_TYPES_RE.test(proto[2])) return '';
+      return rewrite(text);
+    });
+    return rewritten.map((text, index) => {
+      if (text != null) return text;
+      const f = names.map((k) => funcs[k]).find((x) => x.index === index);
+      return Array.from(f.specs.values()).join('\n');
+    });
+  }
+
+  const SAMPLER_TYPES_RE = new RegExp('\\b(' + Object.keys(SAMPLER_TYPES).join('|') + ')\\b');
+
+  /**
+   * Vertex shaders: texture lookups with implicit derivatives exist only in fragment shaders in WebGPU; in a
+   * GLSL vertex shader they read level 0, so texture / textureProj / textureOffset become their Lod forms.
+   */
+  function vertexLod(code) {
+    code = rewriteCalls(code, 'texture', (a) => 'textureLod(' + a[0] + ', ' + a[1] + ', 0.0)');
+    code = rewriteCalls(code, 'textureProj', (a) => 'textureProjLod(' + a[0] + ', ' + a[1] + ', 0.0)');
+    code = rewriteCalls(code, 'textureOffset', (a) => 'textureLodOffset(' + a[0] + ', ' + a[1] + ', 0.0, ' + a[2] + ')');
+    return code;
   }
 
   /**
@@ -293,11 +441,33 @@
       return code;
     };
 
-    // varyings: vertex outputs in order; fragment inputs by name
+    // varyings: vertex outputs in order (a matrix or an array takes several locations); fragment inputs by
+    // name. WebGPU passes only scalars and vectors between stages: matrices go as their columns and arrays as
+    // their elements, copied out at the end of the vertex shader and back at the start of the fragment shader.
     const varyings = {};
-    vs.outputs.forEach((o, i) => { varyings[o.name] = o.loc != null ? o.loc : i; });
-    const vary = (o, dir) => 'layout(location = ' + (varyings[o.name] != null ? varyings[o.name] : 0) + ') '
-      + (o.flat ? 'flat ' : '') + dir + ' ' + o.type + ' ' + o.name + (o.array != null ? '[' + o.array + ']' : '') + ';\n';
+    let nextLoc = 0;
+    for (const o of vs.outputs) {
+      const loc = o.loc != null ? o.loc : nextLoc;
+      varyings[o.name] = loc;
+      nextLoc = Math.max(nextLoc, loc + varyingParts(o, defines).length);
+    }
+    const vary = (o, dir) => {
+      const loc = varyings[o.name] != null ? varyings[o.name] : 0;
+      const parts = varyingParts(o, defines);
+      if (parts.length === 1 && !parts[0].split) {
+        return 'layout(location = ' + loc + ') ' + (o.flat ? 'flat ' : '') + dir + ' ' + o.type + ' ' + o.name
+          + (o.array != null ? '[' + o.array + ']' : '') + ';\n';
+      }
+      return o.type + ' ' + o.name + (o.array != null ? '[' + o.array + ']' : '') + ';\n'
+        + parts.map((p, k) => 'layout(location = ' + (loc + k) + ') ' + (o.flat ? 'flat ' : '') + dir + ' ' + p.type
+          + ' ' + o.name + '_tfP' + k + ';\n').join('');
+    };
+    const unpack = (list, out) => list.map((o) => {
+      const parts = varyingParts(o, defines);
+      if (parts.length === 1 && !parts[0].split) return '';
+      return parts.map((p, k) => '  ' + (out ? o.name + '_tfP' + k + ' = ' + p.expr : p.expr + ' = ' + o.name + '_tfP' + k)
+        + ';\n').join('');
+    }).join('');
 
     const head = '#version 450\n' + defines.join('\n') + '\n' + blockDecl;
     const classes = attribClasses || {};
@@ -315,16 +485,22 @@
         attribDecls += 'layout(location = ' + a.location + ') in ' + a.type + ' ' + a.name + ';\n';
       }
     }
-    let vcode = vs.other.join('\n');
-    vcode = samplerUses(vcode.replace(/\bvoid\s+main\s*\(\s*(void)?\s*\)/, 'void tf_userMain()'), vs);
+    let vcode = specializeSamplerParams(vs.other).join('\n');
+    vcode = vertexLod(samplerUses(vcode.replace(/\bvoid\s+main\s*\(\s*(void)?\s*\)/, 'void tf_userMain()'), vs));
     const vout = head
       + attribDecls
       + vs.outputs.map((o) => vary(o, 'out')).join('')
       + samplerDecls(vs) + vcode
-      + '\nvoid main() {\n' + attribInit + '  tf_userMain();\n  gl_Position.y *= tf_flipY;\n'
+      + '\nvoid main() {\n' + attribInit + '  tf_userMain();\n' + unpack(vs.outputs, true) + '  gl_Position.y *= tf_flipY;\n'
       + '  gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n}\n';
 
-    let fcode = samplerUses(fs.other.join('\n'), fs);
+    let fcode = samplerUses(specializeSamplerParams(fs.other).join('\n'), fs);
+    const fsInit = unpack(fs.inputs, false);
+    if (fsInit) {
+      // (tf_userMain is taken: the alpha test wrapper GlslCompat adds calls the user's main that)
+      fcode = fcode.replace(/\bvoid\s+main\s*\(\s*(void)?\s*\)/, 'void tf_stageMain()')
+        + '\nvoid main() {\n' + fsInit + '  tf_stageMain();\n}\n';
+    }
     let outLoc = 0;
     const fout = head
       + fs.inputs.map((o) => vary(o, 'in')).join('')

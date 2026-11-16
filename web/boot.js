@@ -651,6 +651,37 @@
     });
   }
 
+  // Renderer: WebGL 2 unless ?webgpu, or WebGPU chosen on the loading panel (kept in localStorage; ?webgl overrides).
+  function wantWebGPU() {
+    if (params.has('webgpu')) return true;
+    if (params.has('webgl')) return false;
+    try {
+      return localStorage.getItem('teafabric.renderer') === 'webgpu';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  let rendererStarted = false;
+
+  function showRenderer() {
+    const line = document.getElementById('renderer');
+    const button = document.getElementById('renderer-switch');
+    // before the renderer starts the choice, afterwards what is used
+    document.getElementById('renderer-name').textContent = (rendererStarted ? webgpu : wantWebGPU()) ? 'WebGPU' : 'WebGL 2';
+    button.textContent = wantWebGPU() ? 'Use WebGL 2' : 'Use WebGPU';
+    button.onclick = function () {
+      try {
+        localStorage.setItem('teafabric.renderer', wantWebGPU() ? 'webgl' : 'webgpu');
+      } catch (e) { /* storage unavailable: the address decides (?webgpu) */ }
+      const url = new URL(location.href);
+      url.searchParams.delete('webgpu');
+      url.searchParams.delete('webgl');
+      location.href = url.toString();
+    };
+    line.hidden = false;
+  }
+
   let wasmExports = null;
 
   function loadScript(src) {
@@ -669,6 +700,7 @@
       return;
     }
     try {
+      showRenderer();
       const nameChosen = chooseName().then(function (name) { tf.config.username = name; });
       const storeReady = tf.store.init();
       await loadManifest();
@@ -681,7 +713,7 @@
       tf.archives['/classpath'] = await download('data/classpath.zip', 'Downloading game resources', 0.15, 0);
       tf.archives['/minecraft/assets'] = await download('data/assets.zip', 'Downloading assets', 0.15, 0.15);
       await download('teavm/classes.wasm', 'Downloading game code', 0.2, 0.3);
-      if (params.has('webgpu')) {
+      if (wantWebGPU()) {
         try {
           setStatus('Starting WebGPU…', 0.5);
           await loadScript('webgpu/glsl-vk.js');
@@ -691,8 +723,12 @@
           console.info('[TeaFabric] Rendering with WebGPU: ' + info);
         } catch (e) {
           console.warn('[TeaFabric] WebGPU is not available, using WebGL 2: ' + (e && e.message ? e.message : e));
+          document.getElementById('renderer-hint').textContent = 'WebGPU is not available in this browser: '
+            + (e && e.message ? e.message : e) + '. Using WebGL 2.';
         }
       }
+      rendererStarted = true;
+      showRenderer();
       await storeReady;
       if (!tf.config.username) {
         setStatus('Enter a player name to start.', 0.5);
