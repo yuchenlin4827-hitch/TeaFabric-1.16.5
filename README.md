@@ -15,6 +15,58 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 > 在測試環境只有 WebGPU 跑得動）。
 > 詳見下方「Status」。
 
+## Branch perf-1.16.5: performance first
+
+> **中文**：這個分支追求效能。預設只烘焙四個效能模組（Sodium、Lithium、Phosphor、FerriteCore），不帶 Fabric
+> API；單人世界像 Eaglercraft 那樣在 **Web Worker** 裡跑：伺服器（世界生成、實體、紅石）在另一個執行緒，頁面
+> 只負責畫面與輸入。模組仍在建置時由 Fabric Loader 烘焙（瀏覽器裡沒有載入器的執行成本），另外有我們自己的模組
+> `webmod`（用 Yarn 名稱寫、建置時重新映射），之後的效能改寫都放在這裡。
+
+What differs from the main branch (`ccr-a6ade281-dizv9f`, which carries the Fabulously Optimized set and Iris):
+
+* **Mods**: `scripts/get-mods.sh perf` downloads only the performance mods (Sodium 0.2.0, Lithium 0.6.6,
+  Phosphor 0.8.0, FerriteCore 2.1.1); build with `WITH_FABRIC_API=false scripts/build-web.sh` (none of the four
+  needs Fabric API). `MODS_DIR=...` picks another folder for both scripts. The Wasm module is 55 MB instead of
+  116 MB, the title screen shows after 11 s instead of 37 s (headless Chromium, software rendering), and a build
+  takes about 15 minutes instead of 35. Any other Fabric jar still works the way the main branch describes.
+* **TeaFabric's own mod** (`webmod/`): written against Yarn names, compiled against the Yarn-named client and
+  remapped to intermediary names with tiny-remapper (mixin annotations included), then baked like any mod. It
+  holds the game-level changes below; it is where further rewrites of Minecraft's code go.
+* **Singleplayer worlds in a Web Worker**, as Eaglercraft does: `world-worker.js` starts the same `classes.wasm`
+  (handed over by the page, not downloaded again) with `main(["--worker"])`; Minecraft is bootstrapped there
+  without a window, GL or sound. Playing or creating a world (`MinecraftClient.startIntegratedServer` /
+  `createWorld`, replaced by a mixin) sends the world to the worker: `WorkerHost` loads the data packs and level
+  data as the client would, and `WorkerServer` (vanilla's integrated server without the client: pause, view
+  distance and the player's name arrive as messages) runs it. The client then joins it like a server: boot.js'
+  socket registry treats `ws://teafabric.worker/` as a socket over the worker's message port, so the normal
+  network code (packet encoding, the login) is used unchanged. Pausing (Esc) pauses and saves the world, "Save and
+  Quit to Title" saves and stops it, and the worker sends `level.dat` back for the world list. The worker keeps
+  `saves/` in browser storage (IndexedDB), the page everything else. `?noworker` runs worlds on the page as before.
+
+Measured in headless Chromium (4 cores, software rendering), a new world with the same seed:
+
+| | world on the page | world in the worker |
+|---|---|---|
+| main-thread share of the server | 20–24 % | 0 |
+| standing at spawn, rendering stubbed (`?nogl`): main-thread time per frame | 9.3 ms | 7.4 ms |
+| walking into new terrain for 40 s, rendering stubbed: frame rate | 28.4 fps | 41.9 fps |
+| ... longest frame / frames over 100 ms | 989 ms / 74 | 415 ms / 37 |
+| standing at spawn, software rendering 1280×720 | 9.7 fps | 9.1 fps |
+
+With software rendering the GPU work runs on the same 4 cores as the worker, so the frame rate there does not
+improve (it is set by the renderer, and the worker takes a core from it); the stubbed runs show what the page
+gains when the CPU, not the GPU, is the limit: the server's time leaves the page thread, and stalls while new
+terrain generates are halved. Not measured on a real GPU.
+
+Known limitations: worlds get no list icon (vanilla takes that screenshot next to the integrated server; the list shows its placeholder), no "Open to LAN"; the worker is a second
+instance of the program (more memory: the program and Minecraft's registries twice); it restores every saved file
+from browser storage at start, not just the world being played.
+
+Also found on the way (fixed on this branch): Minecraft's text deserialiser reads Gson's private `JsonReader.pos`
+and `lineStart` by reflection in a static initialiser; without reflection data for them it threw, and the first
+JSON text read after start-up failed, which was the vanilla pack's `pack.mcmeta` ("Broken/missing pack.mcmeta" on
+the page, no vanilla data pack at all in the worker).
+
 ## 線上體驗 / Try it
 
 | | |
