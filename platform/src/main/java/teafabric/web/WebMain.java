@@ -47,6 +47,9 @@ public final class WebMain {
                 ((org.teavm.runtime.fs.memory.InMemoryVirtualFileSystem) vfs)
                         .setUserDir(teafabric.web.vfs.WebFileSystem.GAME_DIR);
             }
+            // JOML (in Iris) formats numbers with the pattern " 0.000E0;-", which TeaVM's DecimalFormat rejects;
+            // this option makes it use a plain number format.
+            System.setProperty("joml.format", "false");
             System.setProperty("io.netty.allocator.type", "unpooled");
             System.setProperty("io.netty.noPreferDirect", "true");
             System.setProperty("io.netty.noUnsafe", "true");

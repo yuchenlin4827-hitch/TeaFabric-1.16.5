@@ -1461,6 +1461,9 @@ public final class GLEmu {
             }
             cached[slot] = param;
         }
+        if (id <= 0) {
+            return; // desktop GL has a default texture 0 with parameters; WebGL reports INVALID_OPERATION
+        }
         gl.texParameteri(WebGL2RenderingContext.TEXTURE_2D, pname, param);
     }
 
@@ -1716,9 +1719,25 @@ public final class GLEmu {
 
     public static void readPixels(int x, int y, int w, int h, int format, int type, ByteBuffer out) {
         int bytes = w * h * bytesPerPixel(format, type);
-        if (NativeMemory.isNative(out)) {
-            gl.readPixels(x, y, w, h, format, type, NativeMemory.u8(NativeMemory.address(out), bytes));
+        if (!NativeMemory.isNative(out)) {
+            return;
         }
+        long address = NativeMemory.address(out);
+        if (format == GLConst.DEPTH_COMPONENT) {
+            // WebGL 2 cannot read depth back. Iris reads the depth at the centre of the screen every frame (the
+            // focus of depth-of-field effects); it gets the far plane.
+            if (type == GLConst.FLOAT) {
+                for (int i = 0; i < w * h; i++) {
+                    NativeMemory.putFloat(address + 4L * i, 1.0f);
+                }
+            } else {
+                for (int i = 0; i < bytes; i++) {
+                    NativeMemory.putByte(address + i, (byte) -1); // all ones: the far plane for an integer type
+                }
+            }
+            return;
+        }
+        gl.readPixels(x, y, w, h, format, type, NativeMemory.u8(address, bytes));
     }
 
     private static WebGLFramebuffer readbackFbo;
