@@ -58,8 +58,8 @@ tasks.register('prepareBakeMods', Sync) {
     if (withFabricApi && setupValue('fabric.api.jar') != null) {
         from(setupJars('fabric.api.modules'))
     }
-    // User-supplied Fabric mods (intermediary-mapped release jars) go into ./mods.
-    from(fileTree('mods') { include '*.jar' })
+    // User-supplied Fabric mods (intermediary-mapped release jars) go into ./mods (-PmodsDir= / MODS_DIR for another).
+    from(fileTree(findProperty('modsDir') ?: 'mods') { include '*.jar' })
     into(new File(bakeRun, 'mods'))
 }
 
