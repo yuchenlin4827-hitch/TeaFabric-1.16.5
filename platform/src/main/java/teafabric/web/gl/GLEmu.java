@@ -1866,6 +1866,33 @@ public final class GLEmu {
         gl.bindFramebuffer(GLConst.DRAW_FRAMEBUFFER, (WebGLFramebuffer) get(framebuffers, drawFramebuffer));
     }
 
+    /**
+     * A depth blit needs the same depth format on both sides (desktop GL converts). When the destination's depth
+     * texture has another format (Iris copies its depth targets into Minecraft's main depth texture), it is
+     * reallocated in the source's format; the blit then overwrites it.
+     */
+    private static void matchDepthFormat() {
+        Integer src = depthAttachments.get(readFramebuffer);
+        Integer dst = depthAttachments.get(drawFramebuffer);
+        if (src == null || dst == null || src.intValue() == dst.intValue() || src >= glFormats.length
+                || dst >= glFormats.length || glFormats[src] == null || glFormats[dst] == null
+                || glFormats[src][0] == glFormats[dst][0] || dst >= textureSizes.size()) {
+            return;
+        }
+        int[] size = textureSizes.get(dst);
+        if (size == null || size[0] <= 0) {
+            return;
+        }
+        int[] f = glFormats[src];
+        int unit = activeTexture;
+        gl.bindTexture(WebGL2RenderingContext.TEXTURE_2D, (WebGLTexture) get(textures, dst));
+        ArrayBufferView none = null;
+        gl.texImage2D(WebGL2RenderingContext.TEXTURE_2D, 0, f[0], size[0], size[1], 0, f[1], f[2], none);
+        gl.bindTexture(WebGL2RenderingContext.TEXTURE_2D, (WebGLTexture) get(textures, boundTexture[unit]));
+        textureSizes.set(dst, new int[] {size[0], size[1], f[0]});
+        glFormats[dst] = f;
+    }
+
     public static int checkFramebufferStatus(int target) {
         return gl.checkFramebufferStatus(target);
     }
@@ -1884,6 +1911,9 @@ public final class GLEmu {
     public static void blitFramebuffer(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1,
             int mask, int filter) {
         restoreDrawBuffers();
+        if ((mask & 0x100) != 0) { // DEPTH_BUFFER_BIT
+            matchDepthFormat();
+        }
         gl.blitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
     }
 
