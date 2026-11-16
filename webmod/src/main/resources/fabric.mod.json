@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "teafabric_game",
+  "version": "1.0.0",
+  "name": "TeaFabric",
+  "description": "Game-level changes for the browser build: singleplayer worlds run in a Web Worker.",
+  "license": "MIT",
+  "environment": "*",
+  "mixins": ["teafabric_game.mixins.json"],
+  "depends": { "fabricloader": "*", "minecraft": "1.16.5" }
+}

@@ -32,6 +32,26 @@ public final class WebPersistence {
     /** Directories under the game directory that are not kept: the asset index (from assets.zip) and logs. */
     private static final String[] SKIPPED = {"assets", "logs", "crash-reports", "debug", "dropped"};
 
+    /**
+     * Worlds in a Web Worker: the worker keeps saves/ (and only that) in browser storage, the page everything
+     * else; the page still removes what it deletes there (a deleted world). Both instances share the store.
+     */
+    private static boolean workerInstance;
+    private static boolean pageWithWorker;
+
+    public static void setWorkerInstance() {
+        workerInstance = true;
+    }
+
+    public static void setPageWithWorker() {
+        pageWithWorker = true;
+    }
+
+    private static boolean keeps(String path) {
+        boolean saves = path.startsWith(WebFileSystem.GAME_DIR + "/saves/");
+        return workerInstance ? saves : !(pageWithWorker && saves);
+    }
+
     /** Saved state: path -> {length, lastModified}. */
     private static final Map<String, long[]> saved = new HashMap<>();
     private static boolean started;
@@ -153,6 +173,9 @@ public final class WebPersistence {
             }
             String path = child.getPath();
             seen.add(path);
+            if (!keeps(path)) {
+                continue; // another instance keeps it (worlds in a worker)
+            }
             long length = child.length();
             long modified = child.lastModified();
             long[] state = saved.get(path);
