@@ -9,6 +9,9 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 > 「JIT」指的是固定管線 OpenGL 的著色器即時特化：遊戲每使用一種新的 GL 狀態組合，就即時產生並編譯一支專用的
 > GLSL ES 3.00 程式並快取。目前狀態：在 Chromium 153 / Chrome 157 中可完整啟動到 **Minecraft 標題畫面**
 > （全景背景、Logo、閃爍標語與按鈕，滑鼠可操作），並可玩單人遊戲（世界存在瀏覽器裡）與多人連線，有音效與背景音樂，可切換語言（含繁體/簡體中文）。
+> 已移植 Fabulously Optimized 1.12.3（1.16.5 最後一版）的全部模組，以及 REI、WTHIT、AppleSkin、Mouse Wheelie、
+> BetterF3、ShulkerBoxTooltip 等介面/輔助模組；Iris 光影包可以用（在世界裡按 O，把光影包 zip 拖進頁面，MakeUp
+> Ultra Fast 已實測可正常顯示）。
 > 詳見下方「Status」。
 
 ## 線上體驗 / Try it
@@ -398,14 +401,41 @@ four mods, a new random world each run:
   software rendering draws the pixels on the CPU, and the random worlds differ more than the builds. On a
   real GPU the saved WebGL calls and texture uploads should count for more; that was not measured.
 
-**Iris (shader packs) does not work** and is not a matter of adapting the mod: shader packs are written for
-desktop OpenGL's compatibility profile (built-in matrices and vertex inputs such as `gl_ModelViewMatrix`
-and `gl_Vertex`, up to eight render targets, shadow maps, and in newer packs compute shaders and image
-load/store), while WebGL 2 runs GLSL ES 3.00 without any of the built-ins, compute shaders or image access.
-Every pack would need a translator for all of that, and a pack renders the world a second time for its
-shadow map and adds a dozen full-screen passes per frame, on a page that already spends most of its
-frame in Minecraft's own code. The WebGPU renderer (`?webgpu`, see Status) brings compute shaders and image
-load/store, which some packs need; the translation of compatibility-profile GLSL is still missing either way.
+**Iris (shader packs) works** with packs written for desktop OpenGL. In a world, press O (Iris' Shader Packs
+screen), drop the pack's `.zip` onto the page, select it and press Apply or Done; packs are kept in browser storage
+like worlds. Tested in headless Chromium with software rendering (SwiftShader):
+
+* **MakeUp Ultra Fast** renders: shader lighting and colour grading, fog, sun haze, translucent leaves, with the
+  HUD, WTHIT and AppleSkin on top.
+* **BSL** (HIGH profile) loads, all of its programs (shadow, 15 gbuffers, deferred, 7 composite, final) translate
+  and link, and a frame is drawn into Minecraft's main framebuffer (checked by reading its pixels back), but the
+  software-rendering test browser then ran out of memory (7 GB) and was killed. Not tested on a real GPU.
+
+What it took:
+
+* **A GLSL translator** (`platform/.../gl/glsl`): packs are written in compatibility-profile GLSL (1.10–1.50:
+  `gl_Vertex`, `gl_ModelViewMatrix`, `gl_FragData`, `texture2D`, `shadow2D`, `ftransform`, built-in fog), WebGL 2
+  runs GLSL ES 3.00. A preprocessor, parser and type checker (with GLSL's implicit int-to-float conversions)
+  rewrite each shader: built-ins become `tf_*` inputs and uniforms that the emulation fills from its fixed-function
+  state (matrices, client arrays, current colour and texture coordinates, fog), names GLSL ES reserves are
+  renamed, global initialisers that are not constant move into `main`, the fixed-function alpha test is added, and
+  varyings a fragment shader reads but its vertex shader does not write are declared when the program is linked.
+  In an offline test it translates every program of four packs (BSL, MakeUp Ultra Fast, Mellow, Miniature Shader).
+* **WebGL rules desktop GL does not have**, handled by the emulation: draw buffers the fragment shader has no
+  output for are masked per draw (WebGL refuses the draw); depth copies (`glCopyTexImage2D` of depth, blits
+  between depth formats) are framebuffer blits in matching formats; depth textures sample with NEAREST unless
+  compare mode is on; a texture unit enabled with no texture bound is off, as in desktop GL (Iris unbinds every
+  unit after its passes while one stays enabled, which turned the HUD and the whole screen black); depth cannot be
+  read back, so Iris' centre depth (the focus of depth of field) is the far plane.
+* **Java side**: `\R` in regular expressions (Iris splits pack files with it) and `\h` are spelled out for
+  TeaVM's regex engine; JOML (in Iris) uses a plain number format (TeaVM's DecimalFormat rejects its pattern);
+  the constants Iris adds to Sodium's enums at run time (a geometry shader type, vertex attributes) are made enum
+  fields at build time, since TeaVM sizes `EnumMap` from an enum's fields (creating a world failed).
+
+Not supported: packs that need geometry shaders (WebGL 2 has none), and shader packs are heavy for a browser
+page (the world is drawn a second time for the shadow map, then a series of full-screen passes); under software
+rendering a frame with MakeUp took seconds. The WebGPU renderer (`?webgpu`, see Status) is not used for shader
+packs yet.
 
 ### Fabulously Optimized and UI/helper mods
 
@@ -435,9 +465,11 @@ plugin, applied only when the mod is present):
   classes that call `Class.forName`) into a generated lookup that `Class.forName` consults first, and keeps
   those classes and their constructors in the build. Night Config (in LambDynamicLights and LambdaBetterGrass)
   loads its file formats that way only to run their static initialisers, which register the file extension;
-  its format detector registers them directly instead.
+  its format detector registers them directly instead, and its file watcher (configs that reload when the file
+  changes) watches nothing.
 * Relative paths are relative to the game directory (`user.dir` and the file system's working directory),
-  as with a desktop launcher (Entity Culling, Smooth Boot write `config/` that way).
+  as with a desktop launcher (Entity Culling, Smooth Boot write `config/` that way). TeaVM's `java.nio.file`
+  looked relative paths up from the root, so `Paths.get` / `Path.of` make them absolute there.
 * Smaller ones: amecs' key binding map (in Mouse Wheelie; reflection on a mixin-added method) is a direct
   call; ShulkerBoxTooltip skips the validation of its config file (validators created by reflection); Dynamic FPS reads page focus and
   visibility through `glfwGetWindowAttrib`; Borderless Mining's undecorated window is the browser's full
