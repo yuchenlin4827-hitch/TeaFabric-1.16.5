@@ -39,7 +39,7 @@ public class GL11 {
     }
 
     public static void glClear(int mask) {
-        WebGLAccess.gl().clear(mask);
+        teafabric.web.gl.GLEmu.clear(mask);
     }
 
     public static void glClearColor(float r, float g, float b, float a) {

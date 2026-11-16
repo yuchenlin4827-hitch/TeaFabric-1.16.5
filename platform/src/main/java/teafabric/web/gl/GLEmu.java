@@ -81,6 +81,8 @@ public final class GLEmu {
         final float[][] cTexMat = new float[3][16];
         final float[] cFog = new float[8];
         boolean texMatInit;
+        /** Colour outputs of the fragment shader (locations 0..n-1); MAX_VALUE when not known. */
+        int colorOutputs = Integer.MAX_VALUE;
     }
 
     /** Compatibility attributes and their preferred locations (Iris binds its own at 11 to 13). */
@@ -910,8 +912,10 @@ public final class GLEmu {
             if (up.compat) {
                 uploadCompat(up);
             }
+            maskDrawBuffers(up.colorOutputs);
             bindArrays(first, count, true);
         } else {
+            maskDrawBuffers(1);
             ShaderJit.Program p = jit.get(buildVariant());
             useGlProgram(p.program);
             uploadUniforms(p);
@@ -1772,6 +1776,8 @@ public final class GLEmu {
         if (f != null) {
             gl.deleteFramebuffer((WebGLFramebuffer) f);
             framebuffers.set(id, null);
+            requestedDrawBuffers.remove(id);
+            appliedDrawBuffers.remove(id);
         }
     }
 
@@ -1818,7 +1824,8 @@ public final class GLEmu {
         int[] f = src != null && src < glFormats.length && glFormats[src] != null ? glFormats[src]
                 : new int[] {36012, GLConst.DEPTH_COMPONENT, GLConst.FLOAT};
         if (allocate) {
-            gl.texImage2D(WebGL2RenderingContext.TEXTURE_2D, 0, f[0], w, h, 0, f[1], f[2], (ArrayBufferView) null);
+            ArrayBufferView none = null; // a cast of null to a JS type is checked at run time (and fails)
+            gl.texImage2D(WebGL2RenderingContext.TEXTURE_2D, 0, f[0], w, h, 0, f[1], f[2], none);
             if (dst > 0 && dst < textureSizes.size()) {
                 textureSizes.set(dst, new int[] {w, h, f[0]});
             }
@@ -1860,6 +1867,7 @@ public final class GLEmu {
 
     public static void blitFramebuffer(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1,
             int mask, int filter) {
+        restoreDrawBuffers();
         gl.blitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
     }
 
@@ -2096,6 +2104,7 @@ public final class GLEmu {
                 fs = i;
             }
         }
+        p.colorOutputs = fs != null && fs.result != null ? fs.result.colorOutputs : Integer.MAX_VALUE;
         p.renamed.clear();
         p.original.clear();
         p.compat = false;
@@ -2320,7 +2329,71 @@ public final class GLEmu {
 
     /** glDrawBuffers: the colour attachments the current framebuffer draws to (Iris' multiple render targets). */
     public static void drawBuffers(int[] buffers) {
+        int[] copy = buffers.clone();
+        requestedDrawBuffers.put(drawFramebuffer, copy);
+        appliedDrawBuffers.put(drawFramebuffer, copy);
         gl.drawBuffers(buffers);
+    }
+
+    private static final int[] DEFAULT_DRAW_BUFFERS = {36064}; // COLOR_ATTACHMENT0
+    /** glDrawBuffers per framebuffer, and what was last given to WebGL (see maskDrawBuffers). */
+    private static final Map<Integer, int[]> requestedDrawBuffers = new HashMap<>();
+    private static final Map<Integer, int[]> appliedDrawBuffers = new HashMap<>();
+
+    /**
+     * Before a draw: draw buffers that the fragment shader has no output for are set to NONE. Desktop GL leaves
+     * them undefined; WebGL refuses the draw ("active draw buffers with missing fragment shader outputs"), and
+     * shader packs draw into several render targets with programs that write only some of them.
+     */
+    private static void maskDrawBuffers(int outputs) {
+        if (drawFramebuffer == 0) {
+            return;
+        }
+        int[] req = requestedDrawBuffers.get(drawFramebuffer);
+        if (req == null) {
+            req = DEFAULT_DRAW_BUFFERS;
+        }
+        int[] applied = appliedDrawBuffers.get(drawFramebuffer);
+        if (applied == null) {
+            applied = req;
+        }
+        boolean same = applied.length == req.length;
+        for (int i = 0; same && i < req.length; i++) {
+            same = applied[i] == (i < outputs ? req[i] : 0);
+        }
+        if (same) {
+            return;
+        }
+        int[] want = new int[req.length];
+        for (int i = 0; i < req.length; i++) {
+            want[i] = i < outputs ? req[i] : 0; // NONE
+        }
+        gl.drawBuffers(want);
+        appliedDrawBuffers.put(drawFramebuffer, want);
+    }
+
+    /** Before a clear or a blit: the draw buffers glDrawBuffers asked for. */
+    static void restoreDrawBuffers() {
+        if (drawFramebuffer == 0) {
+            return;
+        }
+        int[] applied = appliedDrawBuffers.get(drawFramebuffer);
+        if (applied == null) {
+            return;
+        }
+        int[] req = requestedDrawBuffers.get(drawFramebuffer);
+        if (req == null) {
+            req = DEFAULT_DRAW_BUFFERS;
+        }
+        if (!java.util.Arrays.equals(applied, req)) {
+            gl.drawBuffers(req);
+            appliedDrawBuffers.put(drawFramebuffer, req);
+        }
+    }
+
+    public static void clear(int mask) {
+        restoreDrawBuffers();
+        gl.clear(mask);
     }
 
     public static void readBuffer(int mode) {
