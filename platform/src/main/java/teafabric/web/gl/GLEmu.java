@@ -339,6 +339,8 @@ public final class GLEmu {
         intParams.put(3379, gl.getParameteri(WebGL2RenderingContext.MAX_TEXTURE_SIZE));
         // Float and half-float render targets (shader packs' colortex formats), linear filtering of float textures
         enableExtensions(gl);
+        oldDraws = teafabric.web.Boot.config("nomultidraw") != null;
+        multiDraw = oldDraws ? null : multiDrawExtension(gl);
     }
 
     @org.teavm.jso.JSBody(params = "gl", script = "gl.getExtension('EXT_color_buffer_float');"
@@ -903,6 +905,17 @@ public final class GLEmu {
         if (trace) {
             trace("draw mode=" + mode + " count=" + count + " vptr=" + vertexArray.pointer + " vbo=" + vertexArray.buffer);
         }
+        issue(mode, setUpDraw(mode, first, count), count);
+        bindArrayBuffer(arrayBufferBinding);
+    }
+
+    /**
+     * Program, uniforms and vertex arrays for a draw of count vertices from first; returns the vertex the draw call
+     * starts at: first when the attribute pointers stay at the arrays' starts (all arrays in buffers), 0 when they
+     * were moved to the draw's first vertex (client-memory arrays, uploaded from there). Keeping them in place
+     * means consecutive draws from one buffer (Sodium draws each chunk as several ranges) set no pointers again.
+     */
+    private static int setUpDraw(int mode, int first, int count) {
         boolean user = currentProgram != 0;
         if (user) {
             UserProgram up = programs.get(currentProgram);
@@ -913,16 +926,13 @@ public final class GLEmu {
                 uploadCompat(up);
             }
             maskDrawBuffers(up.colorOutputs);
-            bindArrays(first, count, true);
-        } else {
-            maskDrawBuffers(1);
-            ShaderJit.Program p = jit.get(buildVariant());
-            useGlProgram(p.program);
-            uploadUniforms(p);
-            bindArrays(first, count, false);
+            return bindArrays(mode, first, count, true);
         }
-        issue(mode, count);
-        bindArrayBuffer(arrayBufferBinding);
+        maskDrawBuffers(1);
+        ShaderJit.Program p = jit.get(buildVariant());
+        useGlProgram(p.program);
+        uploadUniforms(p);
+        return bindArrays(mode, first, count, false);
     }
 
     /** The fixed-function alpha test, which desktop GL applies after a program's fragment shader too. */
@@ -1089,7 +1099,7 @@ public final class GLEmu {
 
     private static UserProgram drawProgram;
 
-    private static void bindArrays(int first, int count, boolean user) {
+    private static int bindArrays(int mode, int first, int count, boolean user) {
         ArrayPtr[] arrays = drawArrays;
         int[] locations = drawLocations;
         int n = 0;
@@ -1133,6 +1143,10 @@ public final class GLEmu {
                 maxEnd = Math.max(maxEnd, end);
             }
         }
+        // quads are drawn through the shared quad index buffer, which can start at any quad but not inside one
+        boolean rebase = oldDraws || maxEnd > 0 || mode == GLConst.QUADS && (first & 3) != 0;
+        int base = rebase ? first : 0;
+        rebased = rebase;
         if (maxEnd > 0) {
             bindArrayBuffer(STREAM_VBO);
             gl.bufferData(WebGL2RenderingContext.ARRAY_BUFFER, NativeMemory.u8(minStart, (int) (maxEnd - minStart)),
@@ -1155,7 +1169,7 @@ public final class GLEmu {
                 offset = a.pointer + (long) first * stride - minStart;
             } else {
                 buffer = a.buffer;
-                offset = a.pointer + (long) first * stride;
+                offset = a.pointer + (long) base * stride;
             }
             boolean normalized = a.normalized;
             if (!user && (loc == ShaderJit.A_COLOR || loc == ShaderJit.A_NORMAL)) {
@@ -1203,6 +1217,7 @@ public final class GLEmu {
                 }
             }
         }
+        return rebase ? 0 : first;
     }
 
     private static boolean isCompatLocation(UserProgram p, int loc) {
@@ -1267,24 +1282,31 @@ public final class GLEmu {
 
     private static final float[] DEFAULT_TEXCOORD = {0, 0, 0, 1};
 
-    private static void issue(int mode, int count) {
+    private static void issue(int mode, int first, int count) {
         switch (mode) {
             case GLConst.QUADS: {
                 int quads = count / 4;
-                ensureQuadIndices(quads);
+                int q0 = first >> 2; // setUpDraw rebased the arrays when first is inside a quad
+                ensureQuadIndices(q0 + quads);
                 bindElementBuffer(QUAD_IBO);
-                gl.drawElements(WebGL2RenderingContext.TRIANGLES, quads * 6, WebGL2RenderingContext.UNSIGNED_INT, 0);
+                gl.drawElements(WebGL2RenderingContext.TRIANGLES, quads * 6, WebGL2RenderingContext.UNSIGNED_INT,
+                        q0 * 24);
                 break;
             }
-            case GLConst.QUAD_STRIP:
-                gl.drawArrays(WebGL2RenderingContext.TRIANGLE_STRIP, 0, count);
-                break;
-            case GLConst.POLYGON:
-                gl.drawArrays(WebGL2RenderingContext.TRIANGLE_FAN, 0, count);
-                break;
             default:
-                gl.drawArrays(mode, 0, count);
+                gl.drawArrays(glMode(mode), first, count);
                 break;
+        }
+    }
+
+    private static int glMode(int mode) {
+        switch (mode) {
+            case GLConst.QUAD_STRIP:
+                return WebGL2RenderingContext.TRIANGLE_STRIP;
+            case GLConst.POLYGON:
+                return WebGL2RenderingContext.TRIANGLE_FAN;
+            default:
+                return mode;
         }
     }
 
@@ -2650,12 +2672,107 @@ public final class GLEmu {
         vertexAttrib4f(index, x, y, z, w);
     }
 
+    /**
+     * glMultiDrawArrays (Sodium draws each chunk's faces this way): the program, uniforms and vertex arrays are set
+     * up once for all ranges, which are then drawn with one WEBGL_multi_draw call, or one draw call each.
+     */
     public static void multiDrawArrays(int mode, IntBuffer first, IntBuffer count) {
         int n = Math.min(first.remaining(), count.remaining());
-        for (int i = 0; i < n; i++) {
-            drawArrays(mode, first.get(first.position() + i), count.get(count.position() + i));
+        int fp = first.position();
+        int cp = count.position();
+        int i0 = 0;
+        while (i0 < n && count.get(cp + i0) <= 0) {
+            i0++;
         }
+        if (i0 == n) {
+            return;
+        }
+        boolean batch = !trace && !oldDraws;
+        for (int i = i0; i < n && batch; i++) {
+            batch = mode != GLConst.QUADS || (first.get(fp + i) & 3) == 0 || count.get(cp + i) <= 0;
+        }
+        if (batch) {
+            setUpDraw(mode, first.get(fp + i0), count.get(cp + i0));
+        }
+        if (!batch || rebased) {
+            // ranges in client memory, or quads not on quad boundaries: each range on its own
+            for (int i = i0; i < n; i++) {
+                drawArrays(mode, first.get(fp + i), count.get(cp + i));
+            }
+            return;
+        }
+        if (multiDraw == null) {
+            for (int i = i0; i < n; i++) {
+                int c = count.get(cp + i);
+                if (c > 0) {
+                    draws++;
+                    issue(mode, first.get(fp + i), c);
+                }
+            }
+            bindArrayBuffer(arrayBufferBinding);
+            return;
+        }
+        if (multiFirst == null || multiFirst.getLength() < n) {
+            multiFirst = Int32Array.create(Math.max(64, n * 2));
+            multiCount = Int32Array.create(Math.max(64, n * 2));
+        }
+        int m = 0;
+        int quadsEnd = 0;
+        for (int i = i0; i < n; i++) {
+            int f = first.get(fp + i);
+            int c = count.get(cp + i);
+            if (c <= 0 || mode == GLConst.QUADS && c < 4) {
+                continue;
+            }
+            if (mode == GLConst.QUADS) {
+                int quads = c / 4;
+                multiFirst.set(m, (f >> 2) * 24); // byte offsets into the quad index buffer
+                multiCount.set(m, quads * 6);
+                quadsEnd = Math.max(quadsEnd, (f >> 2) + quads);
+            } else {
+                multiFirst.set(m, f);
+                multiCount.set(m, c);
+            }
+            m++;
+        }
+        draws += m;
+        if (m > 0) {
+            if (mode == GLConst.QUADS) {
+                ensureQuadIndices(quadsEnd);
+                bindElementBuffer(QUAD_IBO);
+                multiDrawElements(multiDraw, WebGL2RenderingContext.TRIANGLES, multiCount,
+                        WebGL2RenderingContext.UNSIGNED_INT, multiFirst, m);
+            } else {
+                multiDrawArrays(multiDraw, glMode(mode), multiFirst, multiCount, m);
+            }
+        }
+        bindArrayBuffer(arrayBufferBinding);
     }
+
+    /**
+     * ?nomultidraw: the draw path before multi-draws and attribute pointers kept in place (every draw sets its
+     * pointers to its first vertex and is issued on its own), for comparisons or should a driver misbehave.
+     */
+    private static boolean oldDraws;
+    /** The last draw's set-up moved the attribute pointers to its first vertex (see setUpDraw). */
+    private static boolean rebased;
+    /** WEBGL_multi_draw, or null (not offered; the ?nogl stub and the WebGPU layer offer none). */
+    private static org.teavm.jso.JSObject multiDraw;
+    private static Int32Array multiFirst;
+    private static Int32Array multiCount;
+
+    @org.teavm.jso.JSBody(params = "gl", script = "return gl.getExtension('WEBGL_multi_draw') || null;")
+    private static native org.teavm.jso.JSObject multiDrawExtension(WebGL2RenderingContext gl);
+
+    @org.teavm.jso.JSBody(params = {"ext", "mode", "counts", "type", "offsets", "n"},
+            script = "ext.multiDrawElementsWEBGL(mode, counts, 0, type, offsets, 0, n);")
+    private static native void multiDrawElements(org.teavm.jso.JSObject ext, int mode, Int32Array counts, int type,
+            Int32Array offsets, int n);
+
+    @org.teavm.jso.JSBody(params = {"ext", "mode", "firsts", "counts", "n"},
+            script = "ext.multiDrawArraysWEBGL(mode, firsts, 0, counts, 0, n);")
+    private static native void multiDrawArrays(org.teavm.jso.JSObject ext, int mode, Int32Array firsts,
+            Int32Array counts, int n);
 
     public static void copyBufferSubData(int readTarget, int writeTarget, long readOffset, long writeOffset, long size) {
         gl.copyBufferSubData(readTarget, writeTarget, (int) readOffset, (int) writeOffset, (int) size);

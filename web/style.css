@@ -69,6 +69,19 @@ html, body {
 #name-hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 #name-hint.error { color: var(--error); }
 #note { color: var(--muted); font-size: 12px; margin-bottom: 0; }
+#renderer { font-size: 13px; margin: 14px 0 0; }
+#renderer-switch {
+  margin-left: 6px;
+  padding: 3px 10px;
+  border: 1px solid #3a444f;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+#renderer-switch:hover { border-color: var(--accent); }
+#renderer-hint { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
 #status.error { color: var(--error); white-space: pre-wrap; }
 #log {
   position: fixed;

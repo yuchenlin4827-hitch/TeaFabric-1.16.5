@@ -18,6 +18,7 @@
 
   let device = null;
   let naga = null;
+  let features = new Set();
   let canvasContext = null;
   let canvasFormat = 'bgra8unorm';
   let canvas = null;
@@ -37,8 +38,22 @@
     if (!adapter) throw new Error('No WebGPU adapter');
     const info = adapter.info || {};
     adapterInfo = [info.vendor, info.architecture, info.description].filter(Boolean).join(' ');
+    // optional features shader packs' render targets use (32-bit float targets, R11F_G11F_B10F)
+    const wanted = ['float32-filterable', 'float32-blendable', 'rg11b10ufloat-renderable'];
+    const requiredFeatures = wanted.filter((f) => adapter.features.has(f));
+    features = new Set(requiredFeatures);
     device = await adapter.requestDevice({
-      requiredLimits: { maxTextureDimension2D: Math.min(8192, adapter.limits.maxTextureDimension2D) },
+      requiredFeatures,
+      requiredLimits: {
+        maxTextureDimension2D: Math.min(8192, adapter.limits.maxTextureDimension2D),
+        // shader packs bind up to 8 render targets and many samplers
+        maxColorAttachments: Math.min(8, adapter.limits.maxColorAttachments),
+        maxColorAttachmentBytesPerSample: adapter.limits.maxColorAttachmentBytesPerSample,
+        maxSampledTexturesPerShaderStage: adapter.limits.maxSampledTexturesPerShaderStage,
+        maxSamplersPerShaderStage: adapter.limits.maxSamplersPerShaderStage,
+        maxBindingsPerBindGroup: adapter.limits.maxBindingsPerBindGroup,
+        maxInterStageShaderVariables: adapter.limits.maxInterStageShaderVariables,
+      },
     });
     let errors = 0;
     device.addEventListener('uncapturederror', (e) => {
@@ -205,7 +220,7 @@
     endPass();
     // clears requested on targets nothing was drawn to afterwards
     for (const fb of fbsWithPendingClears) {
-      if (fb.pendingColor || fb.pendingDepth != null) {
+      if (fb.pendingColors.some(Boolean) || fb.pendingDepth != null) {
         beginPass(fb);
         endPass();
       }
@@ -257,7 +272,23 @@
       this.view = null;
     }
   }
-  class GLFramebuffer { constructor() { this.id = nextId++; this.color = []; this.depth = null; this.pendingColor = null; this.pendingDepth = null; } }
+  class GLFramebuffer {
+    constructor() {
+      this.id = nextId++;
+      this.color = [];
+      this.depth = null;
+      this.pendingColors = []; // clear colours per attachment index
+      this.pendingDepth = null;
+      this.drawBuffers = null; // glDrawBuffers; null: COLOR_ATTACHMENT0 only
+    }
+  }
+
+  /** Whether colour attachment i of fb is among its draw buffers (location i writes attachment i). */
+  function drawBufferOn(fb, i) {
+    if (fb.isDefault) return i === 0;
+    const db = fb.drawBuffers;
+    return db ? db[i] === C.COLOR_ATTACHMENT0 + i : i === 0;
+  }
   class GLShader { constructor(type) { this.id = nextId++; this.type = type; this.source = ''; } }
   class GLProgram {
     constructor() {
@@ -383,7 +414,7 @@
         colorAttachments.push(null);
         continue;
       }
-      const clear = fb.pendingColor;
+      const clear = fb.pendingColors[i];
       colorAttachments.push({
         view: c.view,
         loadOp: clear ? 'clear' : 'load',
@@ -405,7 +436,7 @@
         desc.depthStencilAttachment.stencilStoreOp = 'store';
       }
     }
-    fb.pendingColor = null;
+    fb.pendingColors = [];
     fb.pendingDepth = null;
     endPass();
     pass = {
@@ -461,12 +492,30 @@
   }
 
   function gpuFormat(internal, format, type) {
+    if (internal === 35056 || internal === 36013 || format === 34041) return 'depth24plus-stencil8'; // DEPTH(32F)_STENCIL
     if (format === C.DEPTH_COMPONENT || internal === 33189 || internal === 33190 || internal === 33191 || internal === 36012) {
-      return type === C.FLOAT || internal === 36012 ? 'depth32float' : 'depth24plus';
+      return 'depth32float';
     }
-    if (internal === 33321 || (internal === C.RED && format === C.RED)) return 'r8unorm';
+    // 32-bit float targets need two optional features to be filtered and blended; otherwise half floats
+    const f32 = features.has('float32-filterable') && features.has('float32-blendable');
+    switch (internal) {
+      case 33321: return 'r8unorm'; // R8
+      case 33323: return 'rg8unorm'; // RG8
+      case 33325: return 'r16float'; // R16F
+      case 33326: return f32 ? 'r32float' : 'r16float'; // R32F
+      case 33327: return 'rg16float'; // RG16F
+      case 33328: return f32 ? 'rg32float' : 'rg16float'; // RG32F
+      case 34842: case 34843: return 'rgba16float'; // RGBA16F, RGB16F
+      case 34836: case 34837: return f32 ? 'rgba32float' : 'rgba16float'; // RGBA32F, RGB32F
+      case 35898: return features.has('rg11b10ufloat-renderable') ? 'rg11b10ufloat' : 'rgba16float'; // R11F_G11F_B10F
+      case 32857: return 'rgb10a2unorm'; // RGB10_A2
+      default: break;
+    }
+    if (internal === C.RED && format === C.RED) return 'r8unorm';
     return 'rgba8unorm';
   }
+
+  const isDepthFormat = (f) => /^depth/.test(f);
 
   function createGpuTexture(tex, levels) {
     const depth = /^depth/.test(tex.format);
@@ -561,7 +610,9 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
     try {
       const info = naga.validate(m);
       try {
-        return naga.writeWgsl(m, info, {});
+        // Shader packs sample textures inside branches that depend on varyings; WGSL rejects implicit
+        // derivatives in non-uniform control flow unless this check is off (GLSL leaves it undefined).
+        return 'diagnostic(off, derivative_uniformity);\n' + naga.writeWgsl(m, info, {});
       } finally {
         info.free();
       }
@@ -588,6 +639,7 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
     const vs = prog.shaders.find((s) => s.type === C.VERTEX_SHADER);
     const fs = prog.shaders.find((s) => s.type === C.FRAGMENT_SHADER);
     prog.linked = false;
+    prog.textureGroups = null;
     prog.variants.clear();
     prog.pipelines.clear();
     prog.bindGroups.clear();
@@ -619,17 +671,7 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
       prog.layout0 = device.createBindGroupLayout({
         entries: [{ binding: 0, visibility: vis, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: conv.uniformSize } }],
       });
-      const layouts = [prog.layout0];
-      if (conv.samplers.length) {
-        const entries = [];
-        for (const s of conv.samplers) {
-          entries.push({ binding: s.binding, visibility: vis, texture: { sampleType: s.sampleType === 'depth' ? 'depth' : 'float', viewDimension: s.viewDimension } });
-          entries.push({ binding: s.binding + 1, visibility: vis, sampler: { type: s.sampleType === 'depth' ? 'comparison' : 'filtering' } });
-        }
-        prog.layout1 = device.createBindGroupLayout({ entries });
-        layouts.push(prog.layout1);
-      }
-      prog.pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: layouts });
+      prog.layouts = new Map(); // per depth-as-colour mask, see layoutFor
       prog.linked = true;
       prog.log = '';
     } catch (e) {
@@ -678,7 +720,7 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
     return { color: comp(st.srcRGB, st.dstRGB, st.eqRGB), alpha: comp(st.srcA, st.dstA, st.eqA) };
   }
 
-  function draw(mode, count, indexType, indexOffset, instances) {
+  function draw(mode, count, indexType, indexOffset, instances, firstVertex) {
     const prog = st.program;
     if (!prog || !prog.linked || count <= 0) return;
     // room for this draw's scratch data, so that nothing submits while the pass is being recorded
@@ -779,6 +821,10 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
       topology = 'line-list';
     }
 
+    // textures bound to the program's samplers; a depth texture read through a colour sampler (shader packs
+    // read depthtex0 as sampler2D) needs an unfilterable-float binding, so the layout depends on them
+    const texs = boundTextures(prog);
+
     // pipeline
     const blend = blendState();
     const triangles = /triangle/.test(topology);
@@ -787,7 +833,8 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
       + (index && /strip/.test(topology) ? indexFormat : '') + '|' + (blend ? JSON.stringify(blend) : '-') + '|'
       + st.colorMask.join('') + '|' + (st.depthTest ? st.depthFunc : 'off') + (st.depthMask ? 'w' : 'r') + '|'
       + (st.cull ? st.cullFace : 0) + st.frontFace + flip + '|'
-      + (st.offsetFill && triangles ? st.offsetFactor + ',' + st.offsetUnits : '');
+      + (st.offsetFill && triangles ? st.offsetFactor + ',' + st.offsetUnits : '')
+      + '|' + p.colorFormats.map((f, i) => (drawBufferOn(p.fb, i) ? 1 : 0)).join('') + '|' + texs.mask;
     let pipeline = prog.pipelines.get(pkey);
     if (!pipeline) {
       let v;
@@ -800,11 +847,11 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
       const writeMask = (st.colorMask[0] ? 1 : 0) | (st.colorMask[1] ? 2 : 0) | (st.colorMask[2] ? 4 : 0) | (st.colorMask[3] ? 8 : 0);
       // every attachment of the pass needs a target; those the shader does not write are masked off
       const fragTargets = p.colorFormats.map((f, i) => (f ? { format: f, blend: blend || undefined,
-        writeMask: i < Math.max(1, prog.conv.fragmentOutputs) ? writeMask : 0 } : null));
+        writeMask: i < Math.max(1, prog.conv.fragmentOutputs) && drawBufferOn(p.fb, i) ? writeMask : 0 } : null));
       // OpenGL's front faces are counter-clockwise in window space; drawing upside down swaps them.
       const ccw = st.frontFace === C.CCW;
       const desc = {
-        layout: prog.pipelineLayout,
+        layout: layoutFor(prog, texs.mask).pipeline,
         vertex: { module: v.vs, entryPoint: 'main', buffers: slots },
         fragment: { module: v.fs, entryPoint: 'main', targets: fragTargets },
         primitive: {
@@ -859,25 +906,22 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
     p.encoder.setBindGroup(0, g0, [prog.slice.offset]);
 
     // textures
-    if (prog.layout1) {
+    if (prog.conv.samplers.length) {
       const entries = [];
-      let key = '';
+      let key = texs.mask + '/';
       prog.conv.samplers.forEach((s, i) => {
-        let tex = st.units[prog.samplerUnits[i]] || null;
-        if (!tex || !tex.gpu || (s.sampleType !== 'depth' && /^depth/.test(tex.format))) {
-          if (tex && tex.gpu && /^depth/.test(tex.format)) warnOnce('depthsample', 'sampling a depth texture as colour is not supported');
-          tex = dummyTexture();
-        }
+        const tex = texs.list[i];
+        const asColor = texs.mask[i] === 'u';
         tex.lastUse = serial;
-        if (!tex.view) tex.view = tex.gpu.createView();
-        const sampler = gpuSampler(tex, s.sampleType === 'depth');
-        entries.push({ binding: s.binding, resource: tex.view });
+        const view = textureView(tex);
+        const sampler = asColor ? nearestSampler(tex) : gpuSampler(tex, s.sampleType === 'depth');
+        entries.push({ binding: s.binding, resource: view });
         entries.push({ binding: s.binding + 1, resource: sampler });
         key += tex.id + '.' + tex.generation + ':' + SAMPLER_IDS(sampler) + ';';
       });
       let g1 = prog.textureGroups && prog.textureGroups.get(key);
       if (!g1) {
-        g1 = device.createBindGroup({ layout: prog.layout1, entries });
+        g1 = device.createBindGroup({ layout: layoutFor(prog, texs.mask).group, entries });
         prog.textureGroups = prog.textureGroups || new Map();
         if (prog.textureGroups.size > 256) prog.textureGroups.clear();
         prog.textureGroups.set(key, g1);
@@ -926,11 +970,94 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
 
     if (index) {
       p.encoder.setIndexBuffer(index.buffer, indexFormat, index.offset);
-      p.encoder.drawIndexed(drawCount, instances || 1);
+      // generated indices (fans, loops) count from the draw's first vertex
+      p.encoder.drawIndexed(drawCount, instances || 1, 0, indexType ? 0 : firstVertex || 0);
     } else {
-      p.encoder.draw(drawCount, instances || 1);
+      p.encoder.draw(drawCount, instances || 1, firstVertex || 0);
     }
     stats.draws++;
+  }
+
+  /** The textures for a program's samplers, and per sampler 'u' where a depth texture is read as colour. */
+  function boundTextures(prog) {
+    const list = [];
+    let mask = '';
+    prog.conv.samplers.forEach((s, i) => {
+      let tex = st.units[prog.samplerUnits[i]] || null;
+      if (!tex || !tex.gpu) tex = dummyTexture();
+      if (pass && attachedToPass(tex)) {
+        // sampling a texture the pass draws into (undefined in OpenGL, an error in WebGPU)
+        warnOnce('feedback' + prog.id, 'program ' + prog.id + ' samples ' + s.name + ', which it draws into; it reads a placeholder');
+        tex = isDepthFormat(tex.format) ? dummyDepthTexture() : dummyTexture();
+      }
+      const depthAsColor = s.sampleType !== 'depth' && isDepthFormat(tex.format);
+      if (s.sampleType === 'depth' && !isDepthFormat(tex.format)) tex = dummyDepthTexture();
+      list.push(tex);
+      mask += depthAsColor ? 'u' : '-';
+    });
+    return { list, mask };
+  }
+
+  function attachedToPass(tex) {
+    const fb = pass.fb;
+    if (fb.isDefault) return false;
+    if (fb.depth && fb.depth.tex === tex) return true;
+    for (const a of fb.color) if (a && a.tex === tex) return true;
+    return false;
+  }
+
+  /** Bind group and pipeline layouts of a program for a depth-as-colour mask. */
+  function layoutFor(prog, mask) {
+    prog.layouts = prog.layouts || new Map();
+    let l = prog.layouts.get(mask);
+    if (l) return l;
+    const vis = GPU_STAGE.VERTEX | GPU_STAGE.FRAGMENT;
+    const layouts = [prog.layout0];
+    let group = null;
+    if (prog.conv.samplers.length) {
+      const entries = [];
+      prog.conv.samplers.forEach((s, i) => {
+        const depth = s.sampleType === 'depth';
+        const unfilterable = mask[i] === 'u';
+        entries.push({ binding: s.binding, visibility: vis, texture: { sampleType: depth ? 'depth' : unfilterable ? 'unfilterable-float' : 'float', viewDimension: s.viewDimension } });
+        entries.push({ binding: s.binding + 1, visibility: vis, sampler: { type: depth ? 'comparison' : unfilterable ? 'non-filtering' : 'filtering' } });
+      });
+      group = device.createBindGroupLayout({ entries });
+      layouts.push(group);
+    }
+    l = { group, pipeline: device.createPipelineLayout({ bindGroupLayouts: layouts }) };
+    prog.layouts.set(mask, l);
+    return l;
+  }
+
+  /** The view a texture is sampled through (the depth aspect of a depth-stencil texture). */
+  function textureView(tex) {
+    if (!tex.view) tex.view = tex.gpu.createView(/stencil/.test(tex.format) ? { aspect: 'depth-only' } : undefined);
+    return tex.view;
+  }
+
+  function nearestSampler(tex) {
+    const key = 'nearest|' + tex.wrapS + '|' + tex.wrapT;
+    let s = SAMPLERS.get(key);
+    if (!s) {
+      const wrap = (w) => (w === C.CLAMP_TO_EDGE || w === 10496 || w === 33069 ? 'clamp-to-edge' : w === C.MIRRORED_REPEAT ? 'mirror-repeat' : 'repeat');
+      s = device.createSampler({ addressModeU: wrap(tex.wrapS), addressModeV: wrap(tex.wrapT), magFilter: 'nearest', minFilter: 'nearest', mipmapFilter: 'nearest', lodMaxClamp: 0 });
+      SAMPLERS.set(key, s);
+    }
+    return s;
+  }
+
+  let dummyDepth = null;
+  function dummyDepthTexture() {
+    if (!dummyDepth) {
+      dummyDepth = new GLTexture();
+      dummyDepth.width = dummyDepth.height = 1;
+      dummyDepth.format = 'depth32float';
+      dummyDepth.min = dummyDepth.mag = C.NEAREST;
+      createGpuTexture(dummyDepth, 1);
+      dummyDepth.written = 1;
+    }
+    return dummyDepth;
   }
 
   let samplerIdCounter = 0;
@@ -959,6 +1086,141 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
   }
 
   // ------------------------------------------------------------------ blits
+
+  // depth copies: a pass that writes frag_depth from the source texture (depth formats cannot be blitted, and
+  // only some can be copied)
+  const DEPTH_COPY = `
+struct U { src0: vec2f, scale: vec2f, dst0: vec2f, pad: vec2f };
+@group(0) @binding(0) var<uniform> u: U;
+@group(0) @binding(1) var t: texture_depth_2d;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let c = vec2f(f32(i & 1u), f32((i >> 1u) & 1u));
+  return vec4f(c * 2.0 - 1.0, 0.0, 1.0);
+}
+@fragment fn fs(@builtin(position) p: vec4f) -> @builtin(frag_depth) f32 {
+  let s = u.src0 + (p.xy - u.dst0) * u.scale;
+  return textureLoad(t, vec2i(s), 0);
+}`;
+  let depthCopyModule = null;
+  const depthCopyPipelines = new Map();
+
+  function depthCopy(src, dst, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1) {
+    if (!depthCopyModule) depthCopyModule = device.createShaderModule({ code: DEPTH_COPY, label: 'depth copy' });
+    let pipe = depthCopyPipelines.get(dst.format);
+    if (!pipe) {
+      pipe = device.createRenderPipeline({
+        layout: 'auto',
+        vertex: { module: depthCopyModule, entryPoint: 'vs' },
+        fragment: { module: depthCopyModule, entryPoint: 'fs', targets: [] },
+        primitive: { topology: 'triangle-strip' },
+        depthStencil: { format: dst.format, depthWriteEnabled: true, depthCompare: 'always' },
+      });
+      depthCopyPipelines.set(dst.format, pipe);
+    }
+    endPass();
+    // texture rows are OpenGL's rows (render targets are stored bottom-up), so the copy maps texels directly
+    const w = Math.abs(dx1 - dx0);
+    const h = Math.abs(dy1 - dy0);
+    const x = Math.max(0, Math.min(dx0, dx1));
+    const y = Math.max(0, Math.min(dy0, dy1));
+    const vw = Math.min(w, dst.width - x);
+    const vh = Math.min(h, dst.height - y);
+    if (vw <= 0 || vh <= 0) return;
+    const u = new Float32Array([Math.min(sx0, sx1), Math.min(sy0, sy1), Math.abs(sx1 - sx0) / w, Math.abs(sy1 - sy0) / h, x, y, 0, 0]);
+    const r = ringWrite(uniformRing, u, 256);
+    const group = device.createBindGroup({
+      layout: pipe.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: r.buffer, offset: r.offset, size: 32 } },
+        { binding: 1, resource: textureView(src) },
+      ],
+    });
+    const att = { view: attachmentView(dst, 0), depthLoadOp: 'load', depthStoreOp: 'store' };
+    if (/stencil/.test(dst.format)) {
+      att.stencilLoadOp = 'load';
+      att.stencilStoreOp = 'store';
+    }
+    const e = enc().beginRenderPass({ colorAttachments: [], depthStencilAttachment: att });
+    e.setPipeline(pipe);
+    e.setBindGroup(0, group);
+    e.setViewport(x, y, vw, vh, 0, 1);
+    e.draw(4);
+    e.end();
+    src.lastUse = dst.lastUse = serial;
+    dst.written |= 1;
+  }
+
+  /** Copies a rectangle of src into a level of t in another format by drawing it. */
+  function copyByBlit(src, t, level, xoff, yoff, x, y, w, h) {
+    const tmp = new GLFramebuffer();
+    tmp.color[0] = { tex: t, level };
+    const saved = st.drawFb;
+    st.drawFb = tmp;
+    blit(src, x, y, x + w, y + h, xoff, yoff, xoff + w, yoff + h, C.NEAREST);
+    endPass();
+    st.drawFb = saved;
+    t.written |= 1 << level;
+  }
+
+  /** glGenerateMipmap: each level drawn from the one above with linear filtering. */
+  function generateMips(t) {
+    const levels = mipCount(t.width, t.height);
+    if (t.levels < levels) {
+      // recreate with the full chain, keeping level 0
+      const old = createGpuTexture(t, levels);
+      if (old) {
+        endPass();
+        enc().copyTextureToTexture({ texture: old, mipLevel: 0 }, { texture: t.gpu, mipLevel: 0 }, [t.width, t.height]);
+        pendingDestroy.push(old);
+      }
+    }
+    endPass();
+    for (let l = 1; l < t.levels; l++) {
+      const w = Math.max(1, t.width >> l);
+      const h = Math.max(1, t.height >> l);
+      const srcView = t.gpu.createView({ baseMipLevel: l - 1, mipLevelCount: 1 });
+      blitView(srcView, t.format, attachmentView(t, l), w, h);
+    }
+    t.written = (1 << t.levels) - 1;
+    t.lastUse = serial;
+  }
+
+  /** Draws a whole view into a whole target view (used for mipmaps). */
+  function blitView(srcView, format, dstView, w, h) {
+    if (!blitModule) {
+      blitModule = device.createShaderModule({ code: MAIN_BLIT, label: 'blit' });
+      blitSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+      blitSamplerNearest = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
+    }
+    const key = 'mip|' + format;
+    let pipe = blitPipelines.get(key);
+    if (!pipe) {
+      pipe = device.createRenderPipeline({
+        layout: 'auto',
+        vertex: { module: blitModule, entryPoint: 'vs' },
+        fragment: { module: blitModule, entryPoint: 'fs', targets: [{ format }] },
+        primitive: { topology: 'triangle-strip' },
+      });
+      blitPipelines.set(key, pipe);
+    }
+    // flip -1: texture row 0 stays row 0 (the blit shader's NDC y is mirrored by it)
+    const u = new Float32Array([-1, -1, 1, 1, 0, 0, 1, 1, -1, 0, 0, 0]);
+    const r = ringWrite(uniformRing, u, 256);
+    const group = device.createBindGroup({
+      layout: pipe.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: r.buffer, offset: r.offset, size: 48 } },
+        { binding: 1, resource: srcView },
+        { binding: 2, resource: blitSampler },
+      ],
+    });
+    const e = enc().beginRenderPass({ colorAttachments: [{ view: dstView, loadOp: 'clear', clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: 'store' }] });
+    e.setPipeline(pipe);
+    e.setBindGroup(0, group);
+    e.setViewport(0, 0, w, h, 0, 1);
+    e.draw(4);
+    e.end();
+  }
 
   let blitModule = null;
   const blitPipelines = new Map();
@@ -1102,7 +1364,10 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
       }
       if (color && !st.colorMask.every(Boolean)) warnOnce('maskclear', 'clears with a partial colour mask are not supported');
       if (pass && pass.fb === fb) endPass();
-      if (color) fb.pendingColor = st.clearColor.slice();
+      if (color) {
+        // only the draw buffers are cleared
+        for (let i = 0; i < 8; i++) if (drawBufferOn(fb, i)) fb.pendingColors[i] = st.clearColor.slice();
+      }
       if (depth) fb.pendingDepth = st.clearDepth;
       fbsWithPendingClears.add(fb);
     };
@@ -1275,15 +1540,34 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
       const t = tex2d();
       const fb = st.readFb;
       const src = fb && !fb.isDefault && fb.color[0] ? fb.color[0].tex : null;
+      if (t && t.gpu && src && src.gpu && src.format !== t.format && !isDepthFormat(t.format)) {
+        // another format: draw it (as a blit into a framebuffer made of the texture level)
+        copyByBlit(src, t, level, xoff, yoff, x, y, w, h);
+        return;
+      }
       if (!t || !t.gpu || !src || !src.gpu || src.format !== t.format) {
-        warnOnce('copytex', 'copyTexSubImage2D from the screen or between formats is not supported');
+        warnOnce('copytex', 'copyTexSubImage2D from the screen is not supported');
         return;
       }
       endPass();
       enc().copyTextureToTexture({ texture: src.gpu, origin: { x, y } }, { texture: t.gpu, mipLevel: level, origin: { x: xoff, y: yoff } }, [w, h]);
       t.written |= 1 << level;
     };
-    gl.generateMipmap = () => warnOnce('genmip', 'generateMipmap is not supported');
+    gl.copyTexImage2D = (target, level, internal, x, y, w, h, border) => {
+      const t = tex2d();
+      if (!t || target !== C.TEXTURE_2D) return;
+      const fb = st.readFb;
+      const src = fb && !fb.isDefault && fb.color[0] ? fb.color[0].tex : null;
+      const fmt = src ? src.format : gpuFormat(internal, C.RGBA, C.UNSIGNED_BYTE);
+      gl.texImage2D(target, level, internal === C.RGBA || internal === C.RGB ? internal : internal, w, h, 0,
+        C.RGBA, fmt === 'rgba16float' ? C.HALF_FLOAT : C.UNSIGNED_BYTE, null);
+      gl.copyTexSubImage2D(target, level, 0, 0, x, y, w, h);
+    };
+    gl.generateMipmap = (target) => {
+      const t = tex2d();
+      if (!t || !t.gpu || target !== C.TEXTURE_2D || isDepthFormat(t.format)) return;
+      generateMips(t);
+    };
 
     // ---- framebuffers
     gl.createFramebuffer = () => new GLFramebuffer();
@@ -1317,9 +1601,18 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
       }
       return 0;
     };
-    gl.drawBuffers = () => {};
+    gl.drawBuffers = (bufs) => {
+      const fb = st.drawFb;
+      if (!fb.isDefault) fb.drawBuffers = Array.from(bufs);
+    };
     gl.readBuffer = () => {};
     gl.blitFramebuffer = (sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter) => {
+      if (mask & C.DEPTH_BUFFER_BIT) {
+        const src = st.readFb.depth && st.readFb.depth.tex;
+        const dst = st.drawFb.depth && st.drawFb.depth.tex;
+        if (src && dst && src.gpu && dst.gpu) depthCopy(src, dst, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1);
+        else warnOnce('depthblit', 'depth blits to or from the screen are not supported');
+      }
       if (!(mask & C.COLOR_BUFFER_BIT)) return;
       const fb = st.readFb;
       const src = fb && !fb.isDefault && fb.color[0] ? fb.color[0].tex : null;
@@ -1355,6 +1648,23 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
       return 0;
     };
     gl.getProgramInfoLog = (p) => p.log;
+    const UNIFORM_TYPES = {
+      float: 5126, vec2: 35664, vec3: 35665, vec4: 35666, int: 5124, ivec2: 35667, ivec3: 35668, ivec4: 35669,
+      uint: 5125, uvec2: 36294, uvec3: 36295, uvec4: 36296, bool: 35670, bvec2: 35671, bvec3: 35672, bvec4: 35673,
+      mat2: 35674, mat3: 35675, mat4: 35676, sampler2D: 35678, sampler3D: 35679, samplerCube: 35680,
+      sampler2DShadow: 35682, sampler2DArray: 36289, isampler2D: 36298, usampler2D: 36306,
+    };
+    /** The program's uniforms (from the conversion; the user's, without tf_flipY) then its samplers. */
+    gl.getActiveUniform = (p, index) => {
+      if (!p || !p.conv) return null;
+      const list = p.conv.uniforms.filter((u) => u.name !== 'tf_flipY');
+      if (index < list.length) {
+        const u = list[index];
+        return { name: u.count ? u.name + '[0]' : u.name, size: u.count || 1, type: UNIFORM_TYPES[u.type] || 5126 };
+      }
+      const sm = p.conv.samplers[index - list.length];
+      return sm ? { name: sm.name, size: 1, type: UNIFORM_TYPES[sm.type] || 35678 } : null;
+    };
     gl.useProgram = (p) => { st.program = p; };
     gl.validateProgram = () => {};
     gl.getAttribLocation = (p, name) => (p.attribByName && p.attribByName[name] ? p.attribByName[name].location : -1);
@@ -1431,12 +1741,9 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
     gl.uniformMatrix4fv = (l, t, v) => setMatrix(l, 4, 4, v, t);
 
     // ---- draws
-    gl.drawArrays = (mode, first, count) => {
-      if (first) warnOnce('first', 'drawArrays with first > 0 is not supported');
-      draw(mode, count, 0, 0, 1);
-    };
+    gl.drawArrays = (mode, first, count) => draw(mode, count, 0, 0, 1, first);
     gl.drawElements = (mode, count, type, offset) => draw(mode, count, type, offset, 1);
-    gl.drawArraysInstanced = (mode, first, count, n) => draw(mode, count, 0, 0, n);
+    gl.drawArraysInstanced = (mode, first, count, n) => draw(mode, count, 0, 0, n, first);
     gl.drawElementsInstanced = (mode, count, type, offset, n) => draw(mode, count, type, offset, n);
 
     return gl;

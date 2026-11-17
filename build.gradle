@@ -52,14 +52,15 @@ tasks.register('prepareBakeMods', Sync) {
     dependsOn ':baker:jar'
     from(project(':baker').tasks.named('jar'))
     if (findProject(':webmod')?.file('src')?.exists()) {
-        dependsOn ':webmod:jar'
-        from(project(':webmod').tasks.named('jar'))
+        // TeaFabric's own mod, remapped from Yarn to intermediary names (webmod/build.gradle)
+        dependsOn ':webmod:remapJar'
+        from(project(':webmod').file('build/libs/webmod-intermediary.jar'))
     }
     if (withFabricApi && setupValue('fabric.api.jar') != null) {
         from(setupJars('fabric.api.modules'))
     }
-    // User-supplied Fabric mods (intermediary-mapped release jars) go into ./mods.
-    from(fileTree('mods') { include '*.jar' })
+    // User-supplied Fabric mods (intermediary-mapped release jars) go into ./mods (-PmodsDir= / MODS_DIR for another).
+    from(fileTree(findProperty('modsDir') ?: 'mods') { include '*.jar' })
     into(new File(bakeRun, 'mods'))
 }
 

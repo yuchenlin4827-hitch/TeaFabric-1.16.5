@@ -48,6 +48,10 @@ public final class Boot {
         teafabric.web.vfs.WebPersistence.start();
     }
 
+    /** Singleplayer worlds run in a Web Worker (boot.js decided: Workers available, no ?noworker). */
+    @JSBody(script = "return !!(teafabric.worker && teafabric.worker.available);")
+    static native boolean workerAvailable();
+
     public static boolean probe() {
         return config("probe") != null;
     }

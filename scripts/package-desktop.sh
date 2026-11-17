@@ -22,6 +22,7 @@ rm -rf "$ROOT/build/desktop" "$ZIP"
 mkdir -p "$STAGE/web/teavm"
 # The page, the runtime and the data archives; not the test pages (build/web/mini*).
 cp build/web/index.html build/web/boot.js build/web/style.css "$STAGE/web/"
+[ -f build/web/world-worker.js ] && cp build/web/world-worker.js "$STAGE/web/"
 # The WebGPU renderer (?webgpu): the WebGL-on-WebGPU layer, the shader converter and naga (shader translator).
 if [ -d build/web/webgpu ]; then
   mkdir -p "$STAGE/web/webgpu/naga"

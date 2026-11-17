@@ -25,6 +25,7 @@
       waits: params.has('waits') ? '1' : null,
       debug: params.has('debug') ? '1' : null,
       netdebug: params.has('netdebug') ? '1' : null,
+      nomultidraw: params.has('nomultidraw') ? '1' : null, // the old draw path (GLEmu)
       server: params.get('server'),
       proxy: params.get('proxy'),
       protocol: params.get('protocol'),
@@ -277,6 +278,12 @@
   tf.ws = {
     open: function (url) {
       const id = nextSocket++;
+      if (url.indexOf(WORKER_URL) === 0 && tf.worker.available) {
+        // a singleplayer world in the world worker: the same byte stream as a server, over postMessage
+        sockets[id] = { state: 1, queue: [], error: '', worker: true };
+        tf.worker.post({ t: 'open', id: id });
+        return id;
+      }
       const s = sockets[id] = { state: 0, queue: [], error: '', ws: null };
       try {
         const ws = s.ws = new WebSocket(url);
@@ -298,12 +305,96 @@
     error: function (id) { const s = sockets[id]; return s ? s.error : ''; },
     pending: function (id) { const s = sockets[id]; return s ? s.queue.length : 0; },
     take: function (id) { return sockets[id].queue.shift(); },
-    send: function (id, data) { const s = sockets[id]; if (s && s.ws && s.ws.readyState === 1) s.ws.send(data); },
+    send: function (id, data) {
+      const s = sockets[id];
+      if (s && s.worker) {
+        if (s.state !== 1) return;
+        const copy = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength ? data : data.slice();
+        tf.worker.post({ t: 'data', id: id, bytes: copy.buffer }, [copy.buffer]);
+        return;
+      }
+      if (s && s.ws && s.ws.readyState === 1) s.ws.send(data);
+    },
     close: function (id) {
       const s = sockets[id];
       if (!s) return;
       delete sockets[id];
+      if (s.worker) { tf.worker.post({ t: 'close', id: id }); return; }
       try { if (s.ws && s.ws.readyState < 2) s.ws.close(1000); } catch (e) { /* ignore */ }
+    }
+  };
+
+  // ------------------------------------------------------------------ world worker (perf branch)
+
+  // Singleplayer worlds run in a Web Worker (world-worker.js): the page keeps rendering while the worker ticks the
+  // world. teafabric.game.WorkerBridge (webmod) sends commands and reads statuses; the client connects to the
+  // world at WORKER_URL. ?noworker runs worlds on the page as before.
+  const WORKER_URL = 'ws://teafabric.worker/';
+  tf.worker = {
+    available: typeof Worker === 'function' && !params.has('noworker'),
+    w: null,
+    files: [],
+    statuses: [],
+    start: function () {
+      if (this.w || !this.available) return;
+      const self = this;
+      this.w = new Worker('world-worker.js');
+      this.w.onmessage = function (e) { self.receive(e.data); };
+      this.w.onerror = function (e) {
+        console.error('[Worker] ' + (e.message || e));
+        self.statuses.push(JSON.stringify({ t: 'error', text: 'The world worker failed: ' + (e.message || e) }));
+      };
+      Promise.all([download('teavm/classes.wasm', '', 0, 0), download('data/classpath.zip', '', 0, 0)]).then(function (r) {
+        // copies: the page keeps its own (the runtime may read them again)
+        self.w.postMessage({ t: 'init', wasm: r[0].slice(0), classpath: r[1].slice(0), config: tf.config,
+          persist: tf.store.available });
+      });
+    },
+    post: function (msg, transfer) {
+      this.start();
+      this.w.postMessage(msg, transfer || []);
+    },
+    send: function (json) {
+      const files = this.files;
+      this.files = [];
+      this.post({ t: 'cmd', json: json, files: files });
+    },
+    addFile: function (path, data) { this.files.push([path, data]); },
+    takeStatus: function () { return this.statuses.length ? this.statuses.shift() : null; },
+    incoming: [],
+    takenFile: null,
+    takeFile: function () {
+      const f = this.incoming.shift();
+      if (!f) return null;
+      this.takenFile = new Int8Array(f.bytes);
+      return f.path;
+    },
+    receive: function (m) {
+      switch (m.t) {
+        case 'log': {
+          const text = '[world] ' + m.text;
+          if (m.severity >= 3) console.error(text); else if (m.severity === 2) console.warn(text); else console.info(text);
+          break;
+        }
+        case 'status':
+          this.statuses.push(m.json);
+          break;
+        case 'file':
+          this.incoming.push(m);
+          break;
+        case 'data': {
+          const s = sockets[m.id];
+          if (s) s.queue.push(new Int8Array(m.bytes));
+          break;
+        }
+        case 'close': {
+          const s = sockets[m.id];
+          if (s) s.state = 3;
+          break;
+        }
+        default:
+          break;
+      }
     }
   };
 
@@ -651,6 +742,37 @@
     });
   }
 
+  // Renderer: WebGL 2 unless ?webgpu, or WebGPU chosen on the loading panel (kept in localStorage; ?webgl overrides).
+  function wantWebGPU() {
+    if (params.has('webgpu')) return true;
+    if (params.has('webgl')) return false;
+    try {
+      return localStorage.getItem('teafabric.renderer') === 'webgpu';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  let rendererStarted = false;
+
+  function showRenderer() {
+    const line = document.getElementById('renderer');
+    const button = document.getElementById('renderer-switch');
+    // before the renderer starts the choice, afterwards what is used
+    document.getElementById('renderer-name').textContent = (rendererStarted ? webgpu : wantWebGPU()) ? 'WebGPU' : 'WebGL 2';
+    button.textContent = wantWebGPU() ? 'Use WebGL 2' : 'Use WebGPU';
+    button.onclick = function () {
+      try {
+        localStorage.setItem('teafabric.renderer', wantWebGPU() ? 'webgl' : 'webgpu');
+      } catch (e) { /* storage unavailable: the address decides (?webgpu) */ }
+      const url = new URL(location.href);
+      url.searchParams.delete('webgpu');
+      url.searchParams.delete('webgl');
+      location.href = url.toString();
+    };
+    line.hidden = false;
+  }
+
   let wasmExports = null;
 
   function loadScript(src) {
@@ -669,6 +791,7 @@
       return;
     }
     try {
+      showRenderer();
       const nameChosen = chooseName().then(function (name) { tf.config.username = name; });
       const storeReady = tf.store.init();
       await loadManifest();
@@ -681,7 +804,7 @@
       tf.archives['/classpath'] = await download('data/classpath.zip', 'Downloading game resources', 0.15, 0);
       tf.archives['/minecraft/assets'] = await download('data/assets.zip', 'Downloading assets', 0.15, 0.15);
       await download('teavm/classes.wasm', 'Downloading game code', 0.2, 0.3);
-      if (params.has('webgpu')) {
+      if (wantWebGPU()) {
         try {
           setStatus('Starting WebGPU…', 0.5);
           await loadScript('webgpu/glsl-vk.js');
@@ -691,8 +814,12 @@
           console.info('[TeaFabric] Rendering with WebGPU: ' + info);
         } catch (e) {
           console.warn('[TeaFabric] WebGPU is not available, using WebGL 2: ' + (e && e.message ? e.message : e));
+          document.getElementById('renderer-hint').textContent = 'WebGPU is not available in this browser: '
+            + (e && e.message ? e.message : e) + '. Using WebGL 2.';
         }
       }
+      rendererStarted = true;
+      showRenderer();
       await storeReady;
       if (!tf.config.username) {
         setStatus('Enter a player name to start.', 0.5);
@@ -736,6 +863,8 @@
       wasmExports = teavm.instance.exports;
       setStatus('Starting Minecraft…', 0.7);
       teavm.exports.main([]);
+      // the world worker starts while the title screen shows, so a world opens without waiting for it
+      setTimeout(function () { tf.worker.start(); }, 3000);
     } catch (e) {
       console.error(e);
       fail('Failed to start: ' + (e && e.message ? e.message : e)

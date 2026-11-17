@@ -11,8 +11,81 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 > （全景背景、Logo、閃爍標語與按鈕，滑鼠可操作），並可玩單人遊戲（世界存在瀏覽器裡）與多人連線，有音效與背景音樂，可切換語言（含繁體/簡體中文）。
 > 已移植 Fabulously Optimized 1.12.3（1.16.5 最後一版）的全部模組，以及 REI、WTHIT、AppleSkin、Mouse Wheelie、
 > BetterF3、ShulkerBoxTooltip 等介面/輔助模組；Iris 光影包可以用（在世界裡按 O，把光影包 zip 拖進頁面，MakeUp
-> Ultra Fast 已實測可正常顯示）。
+> Ultra Fast 與 BSL 已實測可正常顯示）。光影建議在載入畫面按「Use WebGPU」改用 WebGPU 繪圖（會記住；BSL
+> 在測試環境只有 WebGPU 跑得動）。
 > 詳見下方「Status」。
+
+## Branch perf-1.16.5: performance first
+
+> **中文**：這個分支追求效能。預設只烘焙四個效能模組（Sodium、Lithium、Phosphor、FerriteCore），不帶 Fabric
+> API；單人世界像 Eaglercraft 那樣在 **Web Worker** 裡跑：伺服器（世界生成、實體、紅石）在另一個執行緒，頁面
+> 只負責畫面與輸入。模組仍在建置時由 Fabric Loader 烘焙（瀏覽器裡沒有載入器的執行成本），另外有我們自己的模組
+> `webmod`（用 Yarn 名稱寫、建置時重新映射），之後的效能改寫都放在這裡。
+
+What differs from the main branch (`ccr-a6ade281-dizv9f`, which carries the Fabulously Optimized set and Iris):
+
+* **Mods**: `scripts/get-mods.sh perf` downloads only the performance mods (Sodium 0.2.0, Lithium 0.6.6,
+  Phosphor 0.8.0, FerriteCore 2.1.1); build with `WITH_FABRIC_API=false scripts/build-web.sh` (none of the four
+  needs Fabric API). `MODS_DIR=...` picks another folder for both scripts. The Wasm module is 55 MB instead of
+  116 MB, the title screen shows after 11 s instead of 37 s (headless Chromium, software rendering), and a build
+  takes about 15 minutes instead of 35. Any other Fabric jar still works the way the main branch describes.
+* **TeaFabric's own mod** (`webmod/`): written against Yarn names, compiled against the Yarn-named client and
+  remapped to intermediary names with tiny-remapper (mixin annotations included), then baked like any mod. It
+  holds the game-level changes below; it is where further rewrites of Minecraft's code go.
+* **Singleplayer worlds in a Web Worker**, as Eaglercraft does: `world-worker.js` starts the same `classes.wasm`
+  (handed over by the page, not downloaded again) with `main(["--worker"])`; Minecraft is bootstrapped there
+  without a window, GL or sound. Playing or creating a world (`MinecraftClient.startIntegratedServer` /
+  `createWorld`, replaced by a mixin) sends the world to the worker: `WorkerHost` loads the data packs and level
+  data as the client would, and `WorkerServer` (vanilla's integrated server without the client: pause, view
+  distance and the player's name arrive as messages) runs it. The client then joins it like a server: boot.js'
+  socket registry treats `ws://teafabric.worker/` as a socket over the worker's message port, so the normal
+  network code (packet encoding, the login) is used unchanged. Pausing (Esc) pauses and saves the world, "Save and
+  Quit to Title" saves and stops it, and the worker sends `level.dat` back for the world list. The worker keeps
+  `saves/` in browser storage (IndexedDB), the page everything else. `?noworker` runs worlds on the page as before.
+
+Measured in headless Chromium (4 cores, software rendering), a new world with the same seed:
+
+| | world on the page | world in the worker |
+|---|---|---|
+| main-thread share of the server | 20–24 % | 0 |
+| standing at spawn, rendering stubbed (`?nogl`): main-thread time per frame | 9.3 ms | 7.4 ms |
+| walking into new terrain for 40 s, rendering stubbed: frame rate | 28.4 fps | 41.9 fps |
+| ... longest frame / frames over 100 ms | 989 ms / 74 | 415 ms / 37 |
+| standing at spawn, software rendering 1280×720 | 9.7 fps | 9.1 fps |
+
+With software rendering the GPU work runs on the same 4 cores as the worker, so the frame rate there does not
+improve (it is set by the renderer, and the worker takes a core from it); the stubbed runs show what the page
+gains when the CPU, not the GPU, is the limit: the server's time leaves the page thread, and stalls while new
+terrain generates are halved. Not measured on a real GPU.
+
+**Fewer WebGL calls.** Sodium draws each chunk with one `glMultiDrawArrays` (a range per face direction). The GL
+layer used to issue every range as its own draw and move every vertex attribute pointer to the range's first vertex
+first. Now the pointers stay at the buffer's start (they are moved only for arrays in client memory), quads are
+drawn from an offset into the shared quad index buffer, and a chunk's ranges go out in one `WEBGL_multi_draw` call
+(one draw call each where the browser lacks it; the WebGPU layer draws from a first vertex too). At the same view
+(spectator above the spawn of seed `teafabric`, software rendering):
+
+| | before (`?nomultidraw`) | after |
+|---|---|---|
+| WebGL calls per frame | 4585 | 2058 |
+| ... `vertexAttribPointer` / `bindBuffer` | 2287 / 1163 | 847 / 440 |
+| ... draw calls | 581 | 220 (205 multi-draws) |
+| GL layer's own JavaScript time per frame | 1.6 ms | 1.0 ms |
+| frame rate | 4.3–4.4 fps | 4.4–4.5 fps |
+
+The picture is the same (5 of 921,600 pixels differ). The frame rate does not change here: software rendering is
+limited by SwiftShader's rasterisation, which the page waits for. The gain is meant for real GPUs, where each WebGL
+call is also validated in the browser's GPU process; not measured. `?nomultidraw` restores the old path (for
+comparisons, or should a driver misbehave).
+
+Known limitations: worlds get no list icon (vanilla takes that screenshot next to the integrated server; the list shows its placeholder), no "Open to LAN"; the worker is a second
+instance of the program (more memory: the program and Minecraft's registries twice); it restores every saved file
+from browser storage at start, not just the world being played.
+
+Also found on the way (fixed on this branch): Minecraft's text deserialiser reads Gson's private `JsonReader.pos`
+and `lineStart` by reflection in a static initialiser; without reflection data for them it threw, and the first
+JSON text read after start-up failed, which was the vanilla pack's `pack.mcmeta` ("Broken/missing pack.mcmeta" on
+the page, no vanilla data pack at all in the worker).
 
 ## 線上體驗 / Try it
 
@@ -401,15 +474,37 @@ four mods, a new random world each run:
   software rendering draws the pixels on the CPU, and the random worlds differ more than the builds. On a
   real GPU the saved WebGL calls and texture uploads should count for more; that was not measured.
 
-**Iris (shader packs) works** with packs written for desktop OpenGL. In a world, press O (Iris' Shader Packs
-screen), drop the pack's `.zip` onto the page, select it and press Apply or Done; packs are kept in browser storage
-like worlds. Tested in headless Chromium with software rendering (SwiftShader):
+**Iris (shader packs) works** with packs written for desktop OpenGL, with both renderers (WebGL 2 and WebGPU, see
+below). In a world, press O (Iris' Shader Packs screen), drop the pack's `.zip` onto the page, select it and press
+Apply or Done; packs are kept in browser storage like worlds. Tested in headless Chromium with software rendering
+(SwiftShader):
 
-* **MakeUp Ultra Fast** renders: shader lighting and colour grading, fog, sun haze, translucent leaves, with the
-  HUD, WTHIT and AppleSkin on top.
-* **BSL** (HIGH profile) loads, all of its programs (shadow, 15 gbuffers, deferred, 7 composite, final) translate
-  and link, and a frame is drawn into Minecraft's main framebuffer (checked by reading its pixels back), but the
-  software-rendering test browser then ran out of memory (7 GB) and was killed. Not tested on a real GPU.
+* **MakeUp Ultra Fast** renders with WebGL 2 and with WebGPU, the two alike on the same seed: shader lighting and
+  colour grading, fog, sun haze, translucent leaves, with the HUD, WTHIT and AppleSkin on top.
+* **BSL** (HIGH profile) renders with WebGPU: soft lighting and shadows, sky glow, colour grading. With WebGL 2 all
+  of its programs (shadow, 15 gbuffers, deferred, 7 composite, final) translate and link and a frame is drawn
+  into Minecraft's main framebuffer (checked by reading its pixels back), but the software-rendering test
+  browser then ran out of memory (7 GB) and was killed.
+* Neither was tested on a real GPU.
+
+**WebGPU for shader packs**: the loading panel has a "Use WebGPU" button (remembered in the browser; `?webgpu` and
+`?webgl` in the address override it). For shader packs the WebGPU layer (`web/webgpu`) gained:
+
+* in the shader conversion (`glsl-vk.js`): functions that take a sampler are specialised per sampler they are
+  called with (naga's GLSL front end takes no opaque parameters; packs pass `noisetex` to helpers); matrix and array
+  varyings cross between stages as their columns and elements (WebGPU passes only scalars and vectors); texture
+  lookups in vertex shaders read level 0 (implicit derivatives are fragment-only); samplers the code does not use
+  are left out, as WebGL does (packs declare dozens, more than WebGPU's 16 per stage); the generated WGSL turns off
+  the derivative uniformity check (packs sample inside branches). An offline test converts all 105 programs of
+  MakeUp, BSL and the game itself to WGSL with naga;
+* in the renderer (`webgpu-gl.js`): render target formats (16- and 32-bit float, RGB10_A2, R11F_G11F_B10F, RG8,
+  R16F…; 32-bit float ones need the float32-filterable and float32-blendable features, half floats otherwise),
+  `glDrawBuffers` (only the draw buffers are written and cleared), depth blits and depth copies (a pass that writes
+  `frag_depth` from the source), copies between formats, `glGenerateMipmap`, `glGetActiveUniform`, depth textures
+  read through colour samplers (packs read `depthtex0` as `sampler2D`; an unfilterable binding), and a placeholder
+  for a texture a pass samples while drawing into it (undefined in OpenGL, an error in WebGPU).
+
+With WebGPU, `glReadPixels` still returns nothing: screenshots (F2) and world icons come out black.
 
 What it took:
 
@@ -432,10 +527,9 @@ What it took:
   the constants Iris adds to Sodium's enums at run time (a geometry shader type, vertex attributes) are made enum
   fields at build time, since TeaVM sizes `EnumMap` from an enum's fields (creating a world failed).
 
-Not supported: packs that need geometry shaders (WebGL 2 has none), and shader packs are heavy for a browser
-page (the world is drawn a second time for the shadow map, then a series of full-screen passes); under software
-rendering a frame with MakeUp took seconds. The WebGPU renderer (`?webgpu`, see Status) is not used for shader
-packs yet.
+Not supported: packs that need geometry shaders (neither WebGL 2 nor WebGPU has them), and shader packs are heavy
+for a browser page (the world is drawn a second time for the shadow map, then a series of full-screen passes);
+under software rendering a frame took seconds.
 
 ### Fabulously Optimized and UI/helper mods
 
@@ -569,5 +663,5 @@ Not working yet / known issues:
   WebGL (tested in headless Chromium with SwiftShader, locally and on the Cloudflare site). Frame rates under
   software rendering were the same within noise (5.7 and 3.7 fps with WebGL, 5.4 and 2.3 with WebGPU): the
   time goes to Minecraft's own code, not to the graphics API. Not supported yet: readPixels (screenshots and
-  the world icon come back black), stencil, clears limited by a scissor. WebGPU matters for shader packs,
-  which can use compute shaders and image load/store that WebGL 2 lacks.
+  the world icon come back black), stencil, clears limited by a scissor. For shader packs, see Iris under "Mods";
+  WebGPU can also be chosen on the loading panel.
