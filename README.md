@@ -247,6 +247,32 @@ railway up --service relay && railway domain --service relay
   `RCON_CMDS_STARTUP` (absolute coordinates, `forceload` around them), which was then set back to the
   ban. In sign text, write non-ASCII as `\\\\uXXXX`: one level of backslashes is lost before the
   command reaches the server, and the SNBT string needs `\\u` for the JSON `\u`.
+- **Spawn town** (`deploy/railway/datapack/`, 出生點城鎮): a datapack built around the plaza, so the server is
+  more than plain survival. `python3 deploy/railway/datapack/build_town.py` generates it
+  (`teafabric-town/` and `teafabric-town.zip`; the zip is committed although `*.zip` is ignored).
+  - **Layout:** a walled 65×65 square with gates north, south and west.
+    - north-west: a workshop, free for everyone: crafting tables, furnaces, anvils, a grindstone, brewing, an
+      enchanting table with 15 bookshelves (level 30), and ender chests for personal storage.
+    - north-east: a market with six villager traders. Players sell stone, ores, wood, crops and mob drops for
+      emeralds, and buy food, tools, enchanted books and Nether materials (the Nether is off on this server).
+    - south-east: a newcomers' hall with the rules, help, and a pad that gives a starter kit and a guide book
+      once per player.
+    - south-west: a parkour tower that gives 3 diamonds once per player.
+    - the east gate is a portal that sends players to a random place up to 2000 blocks away.
+  - **Rules inside the wall:** players are in adventure mode (blocks can be used but not broken or placed) and
+    hostile mobs are removed. Outside the wall it is ordinary survival.
+  - **Player commands:** `/trigger spawn` (back to spawn) and `/trigger help`. An operator who wants to edit
+    the town can `/tag <name> add tf_builder` to keep their game mode inside.
+  - **Install:**
+    ```bash
+    railway variables --service minecraft --set REMOVE_OLD_DATAPACKS=TRUE --set SPAWN_PROTECTION=0 \
+      --set "DATAPACKS=https://raw.githubusercontent.com/<owner>/<repo>/<commit>/deploy/railway/datapack/teafabric-town.zip"
+    ```
+    `SPAWN_PROTECTION=0` because vanilla spawn protection also stops non-operators from using crafting tables
+    and furnaces; adventure mode protects the town instead.
+  - **Building:** the load function force-loads the town's chunks and builds 10 s later (fills in unloaded
+    chunks fail silently: the first version left the north half as forest). `BUILD_VERSION` in the script
+    decides whether a server builds it again after a change.
 - **Our server in the web client's list**: `SERVER_ADDRESS` given to `scripts/deploy-cloudflare.sh`
   (and `SERVER` to `scripts/package-desktop.sh`) writes `servers.json`; on a player's first visit the
   page adds that server at the top of the multiplayer list (once: a player who removes it keeps it
@@ -348,8 +374,11 @@ What does work without a rebuild:
 * **Resource packs**: drag the pack `.zip` onto the page while the Resource Packs screen is open,
   confirm, select it, Done (tested: a pack's language file renamed the title screen buttons). Packs are
   kept in browser storage like worlds.
-* **Data packs**: drag them onto Create World → Data Packs (singleplayer; the same screen as resource
-  packs, not tested separately), or install them on a server.
+* **Data packs**: Create World → Data Packs does not work in the browser yet: the screen needs
+  `Files.createTempDirectory`, which the web build lacks, and shows "Failed to copy packs". What works
+  (tested with the spawn-town datapack): put the pack's `.zip` into a world zip's `datapacks/` folder and
+  drop the world zip on the Select World screen. The pack loads when the world is opened. Or install
+  data packs on a server.
 * **Server-side mods and plugins** of the server you connect to (anything that needs no client code).
 
 Rebuilding after adding jars to `./mods` takes about 15–25 minutes (bake + TeaVM + packaging), and
