@@ -8,6 +8,11 @@
   const overlay = document.getElementById('overlay');
   const logEl = document.getElementById('log');
   const params = new URLSearchParams(location.search);
+  // The release build (teavm/classes.wasm, without Java names) by default; ?debug loads the debug build
+  // (teavm/debug/: Java names in browser stack traces and profiles, Java stack traces turned back into source
+  // locations through classes.wasm.teadbg) and turns on debug logging. See scripts/split-debug.py.
+  const DEBUG_BUILD = params.has('debug');
+  const WASM = DEBUG_BUILD ? 'teavm/debug/classes.wasm' : 'teavm/classes.wasm';
 
   const tf = window.teafabric = {
     canvas: canvas,
@@ -490,7 +495,7 @@
   // The TeaVM runtime fetches teavm/classes.wasm and its debug info itself: serve them from download().
   function serveDownloadsToRuntime() {
     // Without files.json only the Wasm module is downloaded here (for the progress bar).
-    const paths = manifest && manifest.files ? Object.keys(manifest.files) : ['teavm/classes.wasm'];
+    const paths = manifest && manifest.files ? Object.keys(manifest.files) : [WASM];
     window.fetch = function (input, init) {
       const url = typeof input === 'string' ? input : (input && input.url) || '';
       for (const path of paths) {
@@ -503,6 +508,22 @@
       }
       return nativeFetch(input, init);
     };
+  }
+
+  // edition.json (from scripts/deploy-cloudflare.sh): this site's edition and a link to the other one.
+  async function showEdition() {
+    try {
+      const r = await nativeFetch('edition.json', { cache: 'no-cache' });
+      if (!r.ok) return;
+      const e = await r.json();
+      if (e.name) document.getElementById('edition-name').textContent = e.name;
+      if (e.other && e.other.url) {
+        const a = document.getElementById('edition-link');
+        a.href = e.other.url;
+        a.textContent = e.other.text || e.other.url;
+        document.getElementById('edition').hidden = false;
+      }
+    } catch (err) { /* no edition.json: a local build */ }
   }
 
   // Optionally compile without the native "js-string" builtins (TeaVM then uses JS fallbacks).
@@ -705,6 +726,7 @@
       const storeReady = tf.store.init();
       await loadManifest();
       serveDownloadsToRuntime();
+      showEdition();
       // servers.json (from the deploy scripts): servers added to the multiplayer list on first visit.
       try {
         const r = await nativeFetch('servers.json', { cache: 'no-cache' });
@@ -712,7 +734,7 @@
       } catch (e) { /* none */ }
       tf.archives['/classpath'] = await download('data/classpath.zip', 'Downloading game resources', 0.15, 0);
       tf.archives['/minecraft/assets'] = await download('data/assets.zip', 'Downloading assets', 0.15, 0.15);
-      await download('teavm/classes.wasm', 'Downloading game code', 0.2, 0.3);
+      await download(WASM, 'Downloading game code', 0.2, 0.3);
       if (wantWebGPU()) {
         try {
           setStatus('Starting WebGPU…', 0.5);
@@ -735,8 +757,9 @@
         await nameChosen;
       }
       setStatus('Compiling WebAssembly…', 0.55);
-      const teavm = await TeaVM.wasmGC.load('teavm/classes.wasm', {
-        stackDeobfuscator: { enabled: !params.has('nodeobf'), infoLocation: 'external' },
+      const teavm = await TeaVM.wasmGC.load(WASM, {
+        // the release build has no debug info to download (and its stack traces stay unresolved)
+        stackDeobfuscator: { enabled: DEBUG_BUILD && !params.has('nodeobf'), infoLocation: 'external' },
         installImports: function (imports) {
           // Frame pacing for glfwSwapBuffers (see WebWindow.waitForFrame).
           imports.teafabricFrame = {

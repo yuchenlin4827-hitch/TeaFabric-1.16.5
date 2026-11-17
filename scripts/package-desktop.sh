@@ -30,7 +30,8 @@ if [ -d build/web/webgpu ]; then
     build/web/webgpu/naga/README.txt "$STAGE/web/webgpu/naga/"
 fi
 cp -r build/web/data "$STAGE/web/"
-cp build/web/teavm/* "$STAGE/web/teavm/"
+# the release build only (no teavm/debug/: ?debug needs the hosted version)
+find build/web/teavm -maxdepth 1 -type f -exec cp {} "$STAGE/web/teavm/" \;
 # Every language (47 MB, about 12 MB zipped); the page loads the chosen one.
 [ -d build/web/lang ] && cp -r build/web/lang "$STAGE/web/"
 # Sound effects (default), or all sounds, from build/web/sounds; the page fetches them when played.
