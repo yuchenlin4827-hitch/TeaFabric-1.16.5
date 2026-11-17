@@ -539,7 +539,9 @@ GUIDE_PAGES = [
     '歡迎來到 TeaFabric！\n\n這本書介紹出生點的城鎮。\n\n城鎮在圍牆裡，裡面是冒險模式：可以用工作台、熔爐、附魔台，但方塊不能拆。走出城門就是一般生存。',
     '工作坊（西北）\n工作台、熔爐、鐵砧、砂輪、釀造台、滿級附魔台、終界箱（個人倉庫）。\n\n商店街（東北）\n把石頭、木頭、農作物、怪物掉落物賣給收購商換綠寶石，再買食物、工具、附魔書、下界材料。',
     '跑酷塔（西南）\n爬到頂端第一次可以拿 3 顆鑽石。\n\n野外傳送門（東門）\n走進去會隨機傳送到 2000 格內的荒野，適合找地方蓋家。\n\n回出生點\n輸入 /trigger spawn',
-    '指令\n/trigger spawn 回出生點\n/trigger help 說明\n/changepassword 舊 新\n\n下界在這個伺服器是關閉的，下界材料可以在商店街向炎婆婆買。\n\n祝玩得開心！',
+    '常用指令\n/spawn 回出生點\n/sethome、/home 家（3 個）\n/tpa 玩家、/tpaccept\n/back 回上一個位置\n/msg 玩家 私訊\n/trigger help 說明\n/changepassword 舊 新',
+    '圈地保護\n禮包裡的金鏟子：右鍵點兩個對角就圈好一塊地，別人不能拆、不能開箱子。/trust 玩家 讓朋友一起蓋，/abandonclaim 取消。可圈的格數會隨遊玩時間增加。\n\n墳墓：死掉的東西留在墳墓，右鍵拿回。',
+    '一個人睡覺就能跳過夜晚。\n\n箱子、背包的空格快速點兩下會自動整理。\n\n下界在這個伺服器是關閉的，下界材料可以在商店街向炎婆婆買。\n\n祝玩得開心！',
 ]
 
 
@@ -584,7 +586,12 @@ execute in minecraft:overworld run tp @s 244.5 63 56.5 0 0
 tellraw @s {"text":"已傳送回出生點","color":"green"}'''
     fn['help'] = '''scoreboard players set @s help 0
 tellraw @s {"text":"—— TeaFabric 伺服器 ——","color":"gold","bold":true}
-tellraw @s [{"text":"/trigger spawn","color":"yellow"},{"text":"  回出生點（城鎮中心）","color":"white"}]
+tellraw @s [{"text":"/spawn","color":"yellow"},{"text":" 或 ","color":"white"},{"text":"/trigger spawn","color":"yellow"},{"text":"  回出生點（城鎮中心）","color":"white"}]
+tellraw @s [{"text":"/sethome 名字","color":"yellow"},{"text":"、","color":"white"},{"text":"/home 名字","color":"yellow"},{"text":"  設定、回到家（最多 3 個）","color":"white"}]
+tellraw @s [{"text":"/tpa 玩家","color":"yellow"},{"text":" 請求傳送到對方，對方輸入 ","color":"white"},{"text":"/tpaccept","color":"yellow"},{"text":" 接受","color":"white"}]
+tellraw @s [{"text":"/back","color":"yellow"},{"text":"  回到上一個位置或死亡地點；","color":"white"},{"text":"/msg 玩家 訊息","color":"yellow"},{"text":" 私訊","color":"white"}]
+tellraw @s [{"text":"圈地","color":"aqua"},{"text":"：拿金鏟子右鍵點兩個對角，裡面別人不能動；","color":"white"},{"text":"/trust 玩家","color":"yellow"},{"text":" 讓朋友一起蓋","color":"white"}]
+tellraw @s [{"text":"墳墓","color":"aqua"},{"text":"：死掉的東西留在墳墓裡，右鍵拿回。","color":"white"},{"text":"睡覺","color":"aqua"},{"text":"：一個人睡就能跳過夜晚。","color":"white"},{"text":"整理","color":"aqua"},{"text":"：在箱子或背包的空格快速點兩下。","color":"white"}]
 tellraw @s [{"text":"工作坊","color":"aqua"},{"text":"（西北）工作台、熔爐、鐵砧、滿級附魔台、終界箱","color":"white"}]
 tellraw @s [{"text":"商店街","color":"aqua"},{"text":"（東北）材料換綠寶石，綠寶石換食物、附魔書、下界材料","color":"white"}]
 tellraw @s [{"text":"新手服務處","color":"aqua"},{"text":"（東南）規則說明，踩金色壓力板領新手禮包（一次）","color":"white"}]
@@ -605,6 +612,7 @@ give @s minecraft:leather_boots
 give @s minecraft:bread 16
 give @s minecraft:torch 16
 give @s minecraft:white_bed
+give @s minecraft:golden_shovel
 give @s minecraft:emerald 5
 give @s minecraft:written_book{{title:"新手指南",author:"TeaFabric",pages:[{pages}]}}
 tellraw @s {{"text":"領到新手禮包了！背包裡有一本新手指南。","color":"green"}}

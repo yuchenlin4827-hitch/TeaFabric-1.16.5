@@ -1,0 +1,86 @@
+{
+  "file": "/data/plugins/Essentials/config.yml",
+  "ops": [
+    {
+      "$set": {
+        "path": "$.use-bukkit-permissions",
+        "value": false,
+        "value-type": "bool"
+      }
+    },
+    {
+      "$set": {
+        "path": "$.player-commands",
+        "value": [
+          "afk",
+          "afk.auto",
+          "back",
+          "back.ondeath",
+          "compass",
+          "delhome",
+          "depth",
+          "getpos",
+          "help",
+          "helpop",
+          "home",
+          "ignore",
+          "info",
+          "list",
+          "mail",
+          "mail.send",
+          "me",
+          "motd",
+          "msg",
+          "ping",
+          "r",
+          "realname",
+          "renamehome",
+          "rules",
+          "seen",
+          "sethome",
+          "sethome.multiple",
+          "sethome.multiple.default",
+          "signs.use.disposal",
+          "signs.use.info",
+          "signs.use.warp",
+          "spawn",
+          "suicide",
+          "tpa",
+          "tpaccept",
+          "tpacancel",
+          "tpahere",
+          "tpdeny",
+          "warp",
+          "warp.list"
+        ]
+      }
+    },
+    {
+      "$put": {
+        "path": "$",
+        "key": "locale",
+        "value": "zh_TW"
+      }
+    },
+    {
+      "$set": {
+        "path": "$.teleport-delay",
+        "value": 3,
+        "value-type": "int"
+      }
+    },
+    {
+      "$set": {
+        "path": "$.update-check",
+        "value": false,
+        "value-type": "bool"
+      }
+    },
+    {
+      "$set": {
+        "path": "$.newbies.kit",
+        "value": ""
+      }
+    }
+  ]
+}

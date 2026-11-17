@@ -1,0 +1,14 @@
+# GriefPrevention admin claim over the spawn town and the roads out of its gates (installed into
+# plugins/GriefPreventionData/ClaimData/ with APPLY_EXTRA_FILES): nobody can claim land there, everyone may use
+# its containers, buttons and traders. Building inside is stopped by the town datapack (adventure mode).
+Lesser Boundary Corner: world;199;0;11
+Greater Boundary Corner: world;289;0;101
+Owner: ''
+Builders: []
+Containers:
+- public
+Accessors:
+- public
+Managers: []
+Parent Claim ID: -1
+inheritNothing: false
