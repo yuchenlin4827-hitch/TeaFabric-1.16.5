@@ -207,8 +207,8 @@ railway add --service minecraft --image itzg/minecraft-server:java17 \
   --variables EULA=TRUE --variables VERSION=1.16.5 --variables TYPE=PAPER --variables ONLINE_MODE=FALSE \
   --variables MODRINTH_PROJECTS=authmereloaded --variables JVM_DD_OPTS=Paper.IgnoreJavaVersion=true \
   --variables MEMORY=512M --variables MALLOC_ARENA_MAX=2 --variables VIEW_DISTANCE=6 --variables ALLOW_NETHER=FALSE \
-  --variables 'JVM_XX_OPTS=-XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=48m -Xss512k -XX:CICompilerCount=2 -XX:+ExitOnOutOfMemoryError' \
-  --variables 'RCON_CMDS_STARTUP=ban Player The name Player is not allowed. Reload the page with ?rename at the end of the address and choose your own name.'
+  --variables 'JVM_XX_OPTS=-XX:+UseSerialGC -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=48m -Xss512k -XX:CICompilerCount=2 -XX:+ExitOnOutOfMemoryError' \
+  --variables 'RCON_CMDS_STARTUP=minecraft:ban Player The name Player is not allowed. Reload the page with ?rename at the end of the address and choose your own name.'
 # add a volume mounted at /data to the minecraft service (dashboard, or the volumeCreate API)
 mkdir relay && cp deploy/railway/relay/package.json proxy/ws-proxy.js relay/ && cd relay
 railway add --service relay --variables 'MC_TARGET=${{minecraft.RAILWAY_PRIVATE_DOMAIN}}:25565' \
@@ -273,6 +273,52 @@ railway up --service relay && railway domain --service relay
   - **Building:** the load function force-loads the town's chunks and builds 10 s later (fills in unloaded
     chunks fail silently: the first version left the north half as forest). `BUILD_VERSION` in the script
     decides whether a server builds it again after a change.
+- **Helper plugins** (輔助插件), all openly licensed and checked to load on Paper 1.16.5 with Java 17:
+
+  | plugin | what players get |
+  |---|---|
+  | EssentialsX 2.21.2 + EssentialsXSpawn (GPL-3.0) | `/sethome` `/home` (3 homes), `/spawn`, `/tpa` `/tpahere` `/tpaccept`, `/back` (also to where you died), `/msg` `/r` `/mail`, `/afk`, `/ignore`, `/seen`, `/suicide`, `/warp`; messages in Traditional Chinese; teleports wait 3 s |
+  | GriefPrevention 16.17.1 (GPL-3.0) | land claims with a golden shovel (in the starter kit): others cannot build or open containers inside; `/trust`, `/abandonclaim`, `/claimslist` |
+  | GravesX 4.9.8.3 (GPL-3.0) | a grave keeps your items and experience where you died |
+  | OnePlayerSleep 4.0.1 (MIT) | one player sleeping skips the night (and the rain) |
+  | ChestSort 1.3 (MIT) | double-click an empty slot to sort a chest, barrel, shulker box or your inventory |
+
+  ```bash
+  B=https://raw.githubusercontent.com/<owner>/<repo>/<commit>/deploy/railway
+  railway variables --service minecraft \
+    --set "MODRINTH_PROJECTS=authmereloaded,essentialsx:Oa9ZDzZq,essentialsx-spawn:RVbLg2Am,oneplayersleepgg:aOoFYmeO,gravesx:5GqMoSyc,chestsort:zcgLnb9L" \
+    --set "PLUGINS=https://mediafilez.forgecdn.net/files/3173/411/GriefPrevention.jar"
+  # after that first start (the plugins create their configuration and data folders):
+  railway variables --service minecraft --set "APPLY_EXTRA_FILES=teafabric/patchdefs<$B/patches/authme-shared-ip.json
+  teafabric/patchdefs<$B/patches/bukkit.json
+  teafabric/patchdefs<$B/patches/essentials.json
+  teafabric/patchdefs<$B/patches/oneplayersleep.json
+  teafabric/patchdefs<$B/patches/chestsort.json
+  plugins/GriefPreventionData/ClaimData<$B/griefprevention/1.yml"
+  ```
+  - **Versions are pinned** (Modrinth version IDs) because the newest builds do not run on this server, although
+    Modrinth lists 1.16.5 for them:
+    - EssentialsX 2.22 relies on the MiniMessage library that Paper only ships from 1.18 ("Error occurred while
+      enabling Essentials", then every EssentialsX command, `ban` included, fails); 2.21.x bundles its own copy.
+    - The newest OnePlayerSleep is compiled for Java 25 and the newest Sleeper partly for Java 21; this
+      server runs Java 17.
+    - GriefPrevention's 1.16 release (16.17.1) is only on BukkitDev and GitHub.
+  - **The patches** (`deploy/railway/patches/`, applied by `PATCH_DEFINITIONS` before each start, so they
+    need the plugins' first start):
+    - EssentialsX: with no permissions plugin, ordinary players get exactly the commands in
+      `player-commands`, once `use-bukkit-permissions` is false. The list leaves out kits (the default `tools`
+      kit could be taken every 10 seconds), the money commands (the town trades in emeralds), nicknames and
+      `/world` (it would reach the End without eyes of ender). The patch also sets `locale: zh_TW`, a 3-second
+      teleport delay, and no kit for newcomers (the town gives one).
+    - OnePlayerSleep: also clears the weather, with a Chinese message.
+    - ChestSort: an empty permission, because otherwise only operators can sort.
+  - **The town's admin claim** (`deploy/railway/griefprevention/1.yml`, the town and the roads out of its gates):
+    players cannot claim land in the town (a claimed workshop would lock everyone else out of its furnaces), and
+    everyone may use its containers, buttons and traders. Install it only after GriefPrevention has started once
+    and created its data folder. On every start GriefPrevention logs "nextClaimID was lesser or equal to an
+    already-existing claim ID" and moves the next ID past it; this is harmless.
+  - **Start-up commands:** `RCON_CMDS_STARTUP` uses `minecraft:ban` / `minecraft:pardon`, because EssentialsX
+    replaces `ban`. Adding `gc` there prints the TPS and heap use to the log on each start.
 - **Our server in the web client's list**: `SERVER_ADDRESS` given to `scripts/deploy-cloudflare.sh`
   (and `SERVER` to `scripts/package-desktop.sh`) writes `servers.json`; on a player's first visit the
   page adds that server at the top of the multiplayer list (once: a player who removes it keeps it
