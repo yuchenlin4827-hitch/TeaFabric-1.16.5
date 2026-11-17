@@ -19,14 +19,15 @@ Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly 
 
 | | |
 |---|---|
-| **網頁版**：在瀏覽器裡直接玩（第一次約下載 40 MB，之後只下載更新的部分） | https://teafabric.teafabric-871743.workers.dev/ |
-| **下載版**：Windows / macOS / Linux，下載一次（約 133 MB，可續傳），之後在本機開啟 | https://teafabric.teafabric-871743.workers.dev/download/ |
+| **兼容版**（網頁）：Fabulously Optimized 全套模組 + Iris 光影，在瀏覽器裡直接玩（第一次約下載 43 MB，之後只下載更新的部分） | https://teafabric.teafabric-871743.workers.dev/ |
+| **效能版**（網頁）：只帶效能模組，單人世界在 Web Worker 裡跑（第一次約下載 32 MB） | https://teafabric-perf.teafabric-871743.workers.dev/ |
+| **下載版**：兼容版，Windows / macOS / Linux，下載一次（約 141 MB，可續傳），之後在本機開啟 | https://teafabric.teafabric-871743.workers.dev/download/ |
 | **QQ 群** | 1063719613 |
 | **Discord** | https://discord.gg/GGN6TUSdNN |
 
 - 網站有**密碼保護**：頁面包含 Minecraft 的程式和素材，不能公開發布。密碼請在 QQ 群或 Discord 索取（使用者名稱隨便填）。
 - 瀏覽器需要支援 WebAssembly GC：Chrome / Edge 119+、Firefox 120+、Safari 18.2+，建議用電腦（鍵盤加滑鼠）。
-- 網頁版第一次載入約 150 MB；網路慢的話建議用下載版。
+- 兩個網頁版的載入畫面都有另一版的連結。網路慢的話建議用效能版或下載版。
 - 進入前要輸入自己的玩家名稱（不能用 `Player`）。「多人遊戲」清單裡已經有我們的伺服器；第一次進入伺服器時輸入
   `/register 密碼 密碼`，之後每次輸入 `/login 密碼`。
 
@@ -177,11 +178,39 @@ fetched none of the large files again). The same Worker relays multiplayer
 connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
 (not tested yet; the free plan's CPU limits may cut busy connections).
 
+**Release and debug builds**: TeaVM's module carries a "name" section with the Java name of every
+function, local, global, type and field (45 % of the file), and the runtime downloads `classes.wasm.teadbg` at
+start-up to turn stack traces back into Java. `scripts/split-debug.py` (run by `scripts/build-web.sh`) splits
+`build/web` into a release build, `teavm/classes.wasm` without the name section, which the page loads, and the
+build as compiled in `teavm/debug/` with the `.teadbg`, which the page loads with `?debug`. The code is the same.
+Compressed first downloads of the game code:
+
+| | before | release (default) | `?debug` |
+|---|---|---|---|
+| compatibility edition (FO mods) | 25.6 MB + 3.6 MB `.teadbg` | 18.5 MB | 25.6 MB + 3.6 MB |
+| performance edition | 14.2 MB + 2.3 MB `.teadbg` | 11.0 MB | 14.2 MB + 2.3 MB |
+
+The resource archives (`classpath.zip`, `assets.zip`) are unchanged; the downloadable version holds only the release build.
+
+**Two editions linked to each other**: `EDITION_NAME=... OTHER_EDITION_URL=https://... OTHER_EDITION_TEXT=...`
+writes `edition.json`; the loading panel then shows the edition's name next to the title and a link to the
+other site. The two hosted sites are deployed with:
+
+```bash
+SERVER_ADDRESS=wss://relay-production-e77b27c1.up.railway.app/ EDITION_NAME=兼容版 \
+  OTHER_EDITION_URL=https://teafabric-perf.teafabric-871743.workers.dev/ \
+  OTHER_EDITION_TEXT="想要更快、下载更小？前往效能版（只带性能模组，单人世界在 Web Worker 里运行）" scripts/deploy-cloudflare.sh
+# from the perf-1.16.5 branch:
+WORKER_NAME=teafabric-perf LAUNCHER=0 SERVER_ADDRESS=wss://relay-production-e77b27c1.up.railway.app/ EDITION_NAME=效能版 \
+  OTHER_EDITION_URL=https://teafabric.teafabric-871743.workers.dev/ \
+  OTHER_EDITION_TEXT="需要光影和更多模组？前往兼容版（Fabulously Optimized 全套 + Iris 光影）" scripts/deploy-cloudflare.sh
+```
+
 **Downloadable version**: `/download/` (behind the same password) offers the game as a zip for people
 who would rather not load 150 MB from the site every time, e.g. on slow connections. It holds `build/web`
 plus a small launcher (`launcher/`, Go) for Windows, macOS and Linux that serves it on
 `http://127.0.0.1:47265/` and opens the default browser; the port is fixed because the browser keeps
-worlds per address. `scripts/package-desktop.sh` builds it (`build/TeaFabric-1.16.5.zip`, about 140 MB with
+worlds per address. `scripts/package-desktop.sh` builds it (`build/TeaFabric-1.16.5.zip`, about 141 MB with
 the sound effects and every language; `SOUNDS=all` adds the music, `SOUNDS=none` leaves sounds out);
 the deploy script uploads it in 24 MiB parts that the Worker joins into one download with Range
 support, so downloads can be resumed. `SERVER_ADDRESS=wss://…` puts the server address on the page and
