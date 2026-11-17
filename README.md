@@ -58,6 +58,26 @@ improve (it is set by the renderer, and the worker takes a core from it); the st
 gains when the CPU, not the GPU, is the limit: the server's time leaves the page thread, and stalls while new
 terrain generates are halved. Not measured on a real GPU.
 
+**Fewer WebGL calls.** Sodium draws each chunk with one `glMultiDrawArrays` (a range per face direction). The GL
+layer used to issue every range as its own draw and move every vertex attribute pointer to the range's first vertex
+first. Now the pointers stay at the buffer's start (they are moved only for arrays in client memory), quads are
+drawn from an offset into the shared quad index buffer, and a chunk's ranges go out in one `WEBGL_multi_draw` call
+(one draw call each where the browser lacks it; the WebGPU layer draws from a first vertex too). At the same view
+(spectator above the spawn of seed `teafabric`, software rendering):
+
+| | before (`?nomultidraw`) | after |
+|---|---|---|
+| WebGL calls per frame | 4585 | 2058 |
+| ... `vertexAttribPointer` / `bindBuffer` | 2287 / 1163 | 847 / 440 |
+| ... draw calls | 581 | 220 (205 multi-draws) |
+| GL layer's own JavaScript time per frame | 1.6 ms | 1.0 ms |
+| frame rate | 4.3–4.4 fps | 4.4–4.5 fps |
+
+The picture is the same (5 of 921,600 pixels differ). The frame rate does not change here: software rendering is
+limited by SwiftShader's rasterisation, which the page waits for. The gain is meant for real GPUs, where each WebGL
+call is also validated in the browser's GPU process; not measured. `?nomultidraw` restores the old path (for
+comparisons, or should a driver misbehave).
+
 Known limitations: worlds get no list icon (vanilla takes that screenshot next to the integrated server; the list shows its placeholder), no "Open to LAN"; the worker is a second
 instance of the program (more memory: the program and Minecraft's registries twice); it restores every saved file
 from browser storage at start, not just the world being played.

@@ -25,6 +25,7 @@
       waits: params.has('waits') ? '1' : null,
       debug: params.has('debug') ? '1' : null,
       netdebug: params.has('netdebug') ? '1' : null,
+      nomultidraw: params.has('nomultidraw') ? '1' : null, // the old draw path (GLEmu)
       server: params.get('server'),
       proxy: params.get('proxy'),
       protocol: params.get('protocol'),
