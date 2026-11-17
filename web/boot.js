@@ -10,7 +10,7 @@
   const params = new URLSearchParams(location.search);
   // The release build (teavm/classes.wasm, without Java names) by default; ?debug loads the debug build
   // (teavm/debug/: Java names in browser stack traces and profiles, Java stack traces turned back into source
-  // locations through classes.wasm.teadbg) and turns on debug logging. See scripts/split-debug.py.
+  // locations through classes.wasm.teadbg). See scripts/split-debug.py. (?debuglog: the DEBUG log level.)
   const DEBUG_BUILD = params.has('debug');
   const WASM = DEBUG_BUILD ? 'teavm/debug/classes.wasm' : 'teavm/classes.wasm';
 
@@ -28,7 +28,7 @@
       trace: params.has('trace') ? '1' : null,
       vanillaMain: params.has('vanillaMain') ? '1' : null,
       waits: params.has('waits') ? '1' : null,
-      debug: params.has('debug') ? '1' : null,
+      debug: params.has('debuglog') ? '1' : null, // DEBUG log level (?debug loads the debug build)
       netdebug: params.has('netdebug') ? '1' : null,
       server: params.get('server'),
       proxy: params.get('proxy'),

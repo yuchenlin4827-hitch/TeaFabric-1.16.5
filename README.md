@@ -601,7 +601,7 @@ on green threads instead of inline), `?trace` (GL upload/draw trace), `?beacon` 
 the HTTP server, survives renderer crashes), `?nogl`, `?noaudio`, `?nobuiltins`, `?nodeobf`,
 `?nofinalize` / `?noweak` (no GC callbacks into Wasm / strong weak references), `?waits` (print the
 Java stack of any lock/future/park wait blocked for more than 5 s: finds green-thread deadlocks),
-`?vanillaMain` (start through `net.minecraft.client.main.Main`), `?debug` (DEBUG log level),
+`?vanillaMain` (start through `net.minecraft.client.main.Main`), `?debug` (the debug build: Java names in browser stack traces and profiles, Java stack traces resolved to source lines; players get the release build without them), `?debuglog` (DEBUG log level; start-up currently fails with an ArrayIndexOutOfBoundsException in `Bootstrap.logMissing` at that level),
 `?netdebug` (stacks for disconnects and closed connections).
 
 ## Status
