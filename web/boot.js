@@ -349,7 +349,7 @@
         console.error('[Worker] ' + (e.message || e));
         self.statuses.push(JSON.stringify({ t: 'error', text: 'The world worker failed: ' + (e.message || e) }));
       };
-      Promise.all([download('teavm/classes.wasm', '', 0, 0), download('data/classpath.zip', '', 0, 0)]).then(function (r) {
+      Promise.all([download(WASM, '', 0, 0), download('data/classpath.zip', '', 0, 0)]).then(function (r) {
         // copies: the page keeps its own (the runtime may read them again)
         self.w.postMessage({ t: 'init', wasm: r[0].slice(0), classpath: r[1].slice(0), config: tf.config,
           persist: tf.store.available });
