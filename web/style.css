@@ -69,6 +69,18 @@ html, body {
 #name-hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 #name-hint.error { color: var(--error); }
 #note { color: var(--muted); font-size: 12px; margin-bottom: 0; }
+#edition { margin: 14px 0 0; font-size: 13px; }
+#edition a {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid #3a444f;
+  border-radius: 4px;
+  color: var(--text);
+  text-decoration: none;
+}
+#edition a:hover, #edition a:focus { border-color: var(--accent); outline: none; }
+#edition a::after { content: " →"; color: var(--accent); }
+#panel h1 #edition-name { font-size: 15px; }
 #renderer { font-size: 13px; margin: 14px 0 0; }
 #renderer-switch {
   margin-left: 6px;
