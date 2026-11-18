@@ -601,6 +601,13 @@ plugin, applied only when the mod is present):
   visibility through `glfwGetWindowAttrib`; Borderless Mining's undecorated window is the browser's full
   screen; WTHIT gets `java.awt.Rectangle`/`Dimension`, Mouse Wheelie `Color.RGBtoHSB`, BetterF3 a garbage
   collector bean, Iris's shader preprocessor an SLF4J binding to Log4j.
+* Fields looked up by name on Minecraft and library classes, which the baker cannot see from the mods' code,
+  keep reflection data in `TeaFabricReflection`: Slight GUI Modifications reads GlStateManager's current colour
+  (`COLOR` and its `Color4` floats, found through `getClass()`) whenever it fades GUI textures in, and without
+  them the client crashed with `NoSuchFieldException` (found while recording with shaders on); Minecraft's text
+  deserialiser reads Gson's private `JsonReader.pos` and `lineStart` in a static initialiser, and without them
+  the first JSON text read after start-up failed (the vanilla pack's `pack.mcmeta`: "Broken/missing
+  pack.mcmeta").
 * A mod entrypoint that fails is logged and the game continues with the others (Fabric Loader would throw
   after the stage, and Not Enough Crashes then skipped every later stage).
 
