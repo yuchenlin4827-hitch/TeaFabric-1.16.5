@@ -59,7 +59,10 @@
     device.addEventListener('uncapturederror', (e) => {
       if (errors++ < 20) console.error('[WebGPU] ' + (e.error && e.error.message || e.error));
     });
-    device.lost.then((i) => console.error('[WebGPU] device lost (' + i.reason + '): ' + i.message + ' after ' + JSON.stringify(stats)));
+    device.lost.then((i) => {
+      console.error('[WebGPU] device lost (' + i.reason + '): ' + i.message + ' after ' + JSON.stringify(stats));
+      if (i.reason !== 'destroyed' && typeof globalThis.TFWebGPU.onLost === 'function') globalThis.TFWebGPU.onLost(i);
+    });
     const mod = await import(new URL('webgpu/naga/naga.js', location.href).href);
     await mod.default({ module_or_path: new URL('webgpu/naga/naga_bg.wasm', location.href) });
     naga = mod;

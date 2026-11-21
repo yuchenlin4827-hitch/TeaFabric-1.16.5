@@ -78,6 +78,15 @@ public class TeaFabricReflection implements ReflectionSupplier {
             // pack.mcmeta: "Broken/missing pack.mcmeta", and in the world worker no vanilla data pack at all).
             return java.util.Arrays.asList("pos", "lineStart");
         }
+        // Slight GUI Modifications fades GUI textures in by reading GlStateManager's current colour by reflection:
+        // the private static COLOR, then the four floats of its Color4. It finds them by name through getClass(),
+        // which the baker cannot follow; without them the first faded draw crashed the client (NoSuchFieldException).
+        if (className.equals("net.minecraft.class_4493")) {
+            return Collections.singletonList("field_20487");
+        }
+        if (className.equals("net.minecraft.class_4493$class_1020")) {
+            return java.util.Arrays.asList("field_5054", "field_5055", "field_5056", "field_5057");
+        }
         named(context);
         if (!data.contains(className)) {
             return Collections.emptyList();

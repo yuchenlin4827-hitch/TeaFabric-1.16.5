@@ -1,0 +1,18 @@
+{
+  "file": "/data/plugins/OnePlayerSleep/config.yml",
+  "ops": [
+    {
+      "$set": {
+        "path": "$.weather-clear",
+        "value": true,
+        "value-type": "bool"
+      }
+    },
+    {
+      "$set": {
+        "path": "$.messages.night-skipped",
+        "value": "&6%player% 睡著了，跳過夜晚"
+      }
+    }
+  ]
+}

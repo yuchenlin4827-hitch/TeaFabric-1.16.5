@@ -8,6 +8,8 @@
 #   SERVER_ADDRESS=wss://relay.example.com/ scripts/deploy-cloudflare.sh   # in the multiplayer list and on /download/
 #   SERVER_NAME=... (its name in the list; default "TeaFabric 伺服器")
 #   LAUNCHER=0 scripts/deploy-cloudflare.sh   # without the downloadable version (/download/)
+#   EDITION_NAME=... OTHER_EDITION_URL=https://... OTHER_EDITION_TEXT=...   # edition.json: this site's edition
+#                                             # and a link to the other one on the loading panel
 #
 # Needs Node.js and a Cloudflare account (npx wrangler login, or CLOUDFLARE_API_TOKEN).
 # classes.wasm is over Cloudflare's 25 MiB file limit, so it is uploaded in parts that boot.js reassembles.
@@ -40,14 +42,29 @@ fi
 [ -d build/web/lang ] && cp -r build/web/lang "$OUT/dist/"
 mkdir -p "$OUT/dist/teavm"
 for f in build/web/teavm/*; do
+  [ -f "$f" ] || continue
   case "$(basename "$f")" in classes.wasm|classes.wasm.teadbg) ;; *) cp "$f" "$OUT/dist/teavm/" ;; esac
 done
+# The debug build (scripts/split-debug.py; the page loads it with ?debug): the module with Java names and the
+# files that turn stack traces back into Java. The release build players get by default has neither.
+large="teavm/classes.wasm teavm/classes.wasm.teadbg"
+if [ -d build/web/teavm/debug ]; then
+  mkdir -p "$OUT/dist/teavm/debug"
+  cp build/web/teavm/debug/classes.wasm-deobfuscator.wasm "$OUT/dist/teavm/debug/"
+  large="teavm/classes.wasm teavm/debug/classes.wasm teavm/debug/classes.wasm.teadbg"
+fi
+if [ -n "${EDITION_NAME:-}${OTHER_EDITION_URL:-}" ]; then
+  node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ name: process.argv[2],
+    other: process.argv[3] ? { url: process.argv[3], text: process.argv[4] } : null }))' \
+    "$OUT/dist/edition.json" "${EDITION_NAME:-}" "${OTHER_EDITION_URL:-}" "${OTHER_EDITION_TEXT:-}"
+fi
 # The large files are stored gzip-compressed (classes.wasm: 100 MB -> 21 MB) under content-hashed names
 # in c/, in parts below the 25 MiB file limit, and listed in files.json; boot.js downloads and
 # decompresses them. The Worker lets browsers cache c/ for a year: a new build has new names.
 mkdir -p "$OUT/dist/c" "$OUT/gz"
-for f in teavm/classes.wasm teavm/classes.wasm.teadbg data/classpath.zip data/assets.zip; do
-  gz="$OUT/gz/$(basename "$f").gz"
+for f in $large data/classpath.zip data/assets.zip; do
+  [ -f "build/web/$f" ] || continue
+  gz="$OUT/gz/$(echo "$f" | tr / _).gz"
   gzip -9 -n -c "build/web/$f" > "$gz"
   hash=$(sha256sum "$gz" | cut -c1-16)
   split -b 24m -d -a 2 "$gz" "$OUT/dist/c/$hash-$(basename "$f").gz.part"

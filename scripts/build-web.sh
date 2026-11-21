@@ -60,5 +60,7 @@ done
 
 step "Packaging build/web"
 run packageWeb || exit 1
+# release build (teavm/classes.wasm without Java names) and debug build (teavm/debug/, loaded with ?debug)
+python3 scripts/split-debug.py build/web || exit 1
 echo
 echo "Done. Serve it with:  python3 -m http.server -d build/web 8080"

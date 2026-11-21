@@ -10,7 +10,7 @@
   <canvas id="game" tabindex="0"></canvas>
   <div id="overlay">
     <div id="panel">
-      <h1>TeaFabric <span>1.16.5</span></h1>
+      <h1>TeaFabric <span>1.16.5</span> <span id="edition-name"></span></h1>
       <p id="status">Loading…</p>
       <div id="bar"><div id="fill"></div></div>
       <form id="name-form" hidden novalidate>
@@ -25,6 +25,7 @@
       <p id="renderer" hidden>Renderer: <b id="renderer-name">WebGL 2</b>
         <button id="renderer-switch" type="button">Use WebGPU</button>
         <span id="renderer-hint">WebGPU is better for shader packs (Iris); with it, screenshots and world icons come out black.</span></p>
+      <p id="edition" hidden><a id="edition-link" href="#"></a></p>
       <p id="note">Minecraft 1.16.5 · Fabric Loader · TeaVM WebAssembly GC</p>
     </div>
   </div>
