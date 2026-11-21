@@ -58,7 +58,18 @@ public final class WebMain {
             if (Boot.config("debug") != null) {
                 org.apache.logging.log4j.LogManager.setThreshold(org.apache.logging.log4j.Level.DEBUG);
             }
+            boolean worker = args.length > 0 && "--worker".equals(args[0]);
+            if (worker) {
+                teafabric.web.vfs.WebPersistence.setWorkerInstance();
+            } else if (Boot.workerAvailable()) {
+                teafabric.web.vfs.WebPersistence.setPageWithWorker();
+            }
             Boot.mountFileSystem();
+            if (worker) {
+                LogSink.log(1, "INFO", "TeaFabric", "Starting the world worker (Minecraft 1.16.5 server)", null);
+                WebWorkerMain.run();
+                return;
+            }
             LogSink.log(1, "INFO", "TeaFabric", "Starting Minecraft 1.16.5 (Fabric, TeaVM Wasm GC)", null);
             if (Boot.config("vanillaMain") != null) {
                 net.minecraft.client.main.Main.main(Boot.gameArguments());

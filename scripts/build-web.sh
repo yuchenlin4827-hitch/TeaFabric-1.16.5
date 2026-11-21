@@ -36,8 +36,9 @@ if [ ! -f .cache/minecraft/client-intermediary.jar ]; then
   run :tools:remapIntermediary || exit 1
 fi
 
-step "Baking mods (Fabric Loader + Mixin): $(ls mods/*.jar 2>/dev/null | wc -l) jar(s) in ./mods"
-run bake -PwithFabricApi="${WITH_FABRIC_API:-true}" || exit 1
+MODS_DIR=${MODS_DIR:-mods}
+step "Baking mods (Fabric Loader + Mixin): $(ls "$MODS_DIR"/*.jar 2>/dev/null | wc -l) jar(s) in ./$MODS_DIR"
+run bake -PwithFabricApi="${WITH_FABRIC_API:-true}" -PmodsDir="$MODS_DIR" || exit 1
 
 compiled=0
 for attempt in 1 2 3 4 5 6; do

@@ -723,7 +723,7 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
     return { color: comp(st.srcRGB, st.dstRGB, st.eqRGB), alpha: comp(st.srcA, st.dstA, st.eqA) };
   }
 
-  function draw(mode, count, indexType, indexOffset, instances) {
+  function draw(mode, count, indexType, indexOffset, instances, firstVertex) {
     const prog = st.program;
     if (!prog || !prog.linked || count <= 0) return;
     // room for this draw's scratch data, so that nothing submits while the pass is being recorded
@@ -973,9 +973,10 @@ struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f }
 
     if (index) {
       p.encoder.setIndexBuffer(index.buffer, indexFormat, index.offset);
-      p.encoder.drawIndexed(drawCount, instances || 1);
+      // generated indices (fans, loops) count from the draw's first vertex
+      p.encoder.drawIndexed(drawCount, instances || 1, 0, indexType ? 0 : firstVertex || 0);
     } else {
-      p.encoder.draw(drawCount, instances || 1);
+      p.encoder.draw(drawCount, instances || 1, firstVertex || 0);
     }
     stats.draws++;
   }
@@ -1743,12 +1744,9 @@ struct U { src0: vec2f, scale: vec2f, dst0: vec2f, pad: vec2f };
     gl.uniformMatrix4fv = (l, t, v) => setMatrix(l, 4, 4, v, t);
 
     // ---- draws
-    gl.drawArrays = (mode, first, count) => {
-      if (first) warnOnce('first', 'drawArrays with first > 0 is not supported');
-      draw(mode, count, 0, 0, 1);
-    };
+    gl.drawArrays = (mode, first, count) => draw(mode, count, 0, 0, 1, first);
     gl.drawElements = (mode, count, type, offset) => draw(mode, count, type, offset, 1);
-    gl.drawArraysInstanced = (mode, first, count, n) => draw(mode, count, 0, 0, n);
+    gl.drawArraysInstanced = (mode, first, count, n) => draw(mode, count, 0, 0, n, first);
     gl.drawElementsInstanced = (mode, count, type, offset, n) => draw(mode, count, type, offset, n);
 
     return gl;

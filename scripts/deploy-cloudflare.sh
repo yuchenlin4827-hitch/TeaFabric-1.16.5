@@ -24,6 +24,8 @@ rm -rf "$OUT/dist"
 mkdir -p "$OUT/dist"
 # The page and the runtime; not the test pages (build/web/mini*).
 cp build/web/index.html build/web/boot.js build/web/style.css "$OUT/dist/"
+# the world worker (singleplayer worlds in a Web Worker), when the build has one
+[ -f build/web/world-worker.js ] && cp build/web/world-worker.js "$OUT/dist/"
 # The WebGPU renderer (?webgpu): the WebGL-on-WebGPU layer, the shader converter and naga (shader translator).
 if [ -d build/web/webgpu ]; then
   mkdir -p "$OUT/dist/webgpu/naga"

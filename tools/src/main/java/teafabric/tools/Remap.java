@@ -19,7 +19,9 @@ import net.fabricmc.tinyremapper.TinyUtils;
  * <ul>
  *   <li>{@code official -> intermediary}: produces the compile classpath for {@code :webmod} mixins
  *       (Fabric mods are always compiled against / shipped in intermediary names);</li>
- *   <li>{@code intermediary -> named} with Yarn: an optional human-readable copy for local reference.</li>
+ *   <li>{@code intermediary -> named} with Yarn: an optional human-readable copy for local reference;</li>
+ *   <li>{@code named -> intermediary} with Yarn and {@code --mixin=true}: {@code :webmod}, written in Yarn names,
+ *       into the intermediary names Fabric mods ship in (mixin annotations included).</li>
  * </ul>
  */
 public final class Remap {
@@ -47,7 +49,12 @@ public final class Remap {
             Files.copy(zip.getInputStream(entry), tiny, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
         IMappingProvider mappings = TinyUtils.createTinyMappingProvider(tiny, from, to);
-        TinyRemapper remapper = TinyRemapper.newRemapper()
+        TinyRemapper.Builder builder = TinyRemapper.newRemapper();
+        if ("true".equals(o.get("mixin"))) {
+            // a mod's own mixins (webmod): annotation targets and @Shadow members are remapped too
+            builder.extension(new net.fabricmc.tinyremapper.extension.mixin.MixinExtension());
+        }
+        TinyRemapper remapper = builder
                 .withMappings(mappings)
                 .renameInvalidLocals(true)
                 .rebuildSourceFilenames(true)

@@ -1,1 +1,49 @@
 plugins { id 'java' }
+
+// TeaFabric's own Fabric mod: game-level code written against Yarn names (readable), compiled against the
+// Yarn-named client (.cache/minecraft/client-named.jar, from :tools:remapNamed) and then remapped to
+// intermediary names, mixin annotations included, like any released mod. The remapped jar is baked with the
+// other mods (root build.gradle, prepareBakeMods), so its mixins are applied at build time and its classes are
+// part of the compiled program.
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.compilerArgs += ['-Xlint:-options']
+}
+
+def namedClient = rootProject.file('.cache/minecraft/client-named.jar')
+def teavmVersion = rootProject.property('teavm_version')
+
+dependencies {
+    compileOnly files(namedClient)
+    compileOnly files(rootProject.setupJars('minecraft.libraries').findAll { !it.name.startsWith('lwjgl') })
+    compileOnly files(rootProject.setupJars('fabric.classpath'))
+    compileOnly files(rootProject.setupValue('fabric.loaderJar'))
+    // JavaScript interop (the worker bridge) is compiled by TeaVM like the platform layer's
+    compileOnly "org.teavm:teavm-jso:${teavmVersion}"
+    compileOnly "org.teavm:teavm-interop:${teavmVersion}"
+    compileOnly "org.teavm:teavm-jso-apis:${teavmVersion}"
+}
+
+tasks.named('compileJava') { dependsOn ':tools:remapNamed' }
+
+def remapped = file("${buildDir}/libs/webmod-intermediary.jar")
+
+tasks.register('remapJar', JavaExec) {
+    group = 'teafabric'
+    description = 'Remaps the mod from Yarn to intermediary names (what the baker and Fabric Loader expect).'
+    dependsOn 'jar', ':tools:classes'
+    def tools = project(':tools')
+    classpath = tools.sourceSets.main.runtimeClasspath
+    mainClass = 'teafabric.tools.Remap'
+    inputs.file(tasks.named('jar').map { it.archiveFile })
+    outputs.file(remapped)
+    doFirst {
+        args "--input=${tasks.named('jar').get().archiveFile.get().asFile}",
+             "--output=${remapped}",
+             "--mappings=${tools.configurations.yarn.singleFile}",
+             "--from=named", "--to=intermediary", "--mixin=true",
+             "--classpath=${([namedClient] + rootProject.setupJars('minecraft.libraries')).join(File.pathSeparator)}"
+    }
+}

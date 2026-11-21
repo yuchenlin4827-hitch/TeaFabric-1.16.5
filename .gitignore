@@ -40,3 +40,4 @@ web/dist/
 
 # Mods dropped in for baking are third-party files: never commit them.
 mods/*.jar
+mods-*/*.jar

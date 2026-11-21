@@ -24,7 +24,7 @@ import teafabric.web.log.LogSink;
  */
 public final class MemoryChannel extends EmbeddedChannel {
     /** Integrated servers listening: address -> the server bootstrap's child handler. */
-    private static final Map<LocalAddress, ChannelHandler> SERVERS = new HashMap<>();
+    private static final Map<LocalAddress, ChannelHandler> SERVERS = new java.util.LinkedHashMap<>();
     private static final List<MemoryChannel> CHANNELS = new ArrayList<>();
     private static int nextId;
     private static boolean pumping;
@@ -74,6 +74,18 @@ public final class MemoryChannel extends EmbeddedChannel {
             SERVERS.remove(address);
             super.doClose();
         }
+    }
+
+    /**
+     * The child handler of the most recently bound integrated server (in the Web Worker, the server whose
+     * connections arrive over the worker's sockets), or null.
+     */
+    public static ChannelHandler lastBoundServer() {
+        ChannelHandler last = null;
+        for (ChannelHandler h : SERVERS.values()) {
+            last = h;
+        }
+        return last;
     }
 
     // ------------------------------------------------------------------ client side

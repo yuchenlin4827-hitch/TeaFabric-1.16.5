@@ -76,7 +76,7 @@ and do not publish the built web bundle.
 
 The two hosted sites are built from two branches of this repository:
 
-| | compatibility edition (this branch, `ccr-a6ade281-dizv9f`) | performance edition (`perf-1.16.5`) |
+| | compatibility edition (the main branch, `ccr-a6ade281-dizv9f`) | performance edition (this branch, `perf-1.16.5`) |
 |---|---|---|
 | mods | Fabric API and 46 jars in `./mods`: the 45 that `scripts/get-mods.sh` downloads (Fabulously Optimized 1.12.3, REI, WTHIT, AppleSkin, Mouse Wheelie, BetterF3, ShulkerBoxTooltip) and ViaFabric, added by hand (see Server protocol); the title screen counts 141 mods with Fabric API's modules and bundled libraries | Sodium, Lithium, Phosphor and FerriteCore, no Fabric API, plus TeaFabric's own `webmod` |
 | shader packs (Iris) | yes | no |
@@ -88,6 +88,74 @@ The two hosted sites are built from two branches of this repository:
 
 The test machine throughout this README: headless Chromium, SwiftShader software rendering, 4 cores. Nothing
 was measured on a real GPU.
+
+## Branch perf-1.16.5: performance first
+
+> **中文**：這個分支追求效能。預設只烘焙四個效能模組（Sodium、Lithium、Phosphor、FerriteCore），不帶 Fabric
+> API；單人世界像 Eaglercraft 那樣在 **Web Worker** 裡跑：伺服器（世界生成、實體、紅石）在另一個執行緒，頁面
+> 只負責畫面與輸入。模組仍在建置時由 Fabric Loader 烘焙（瀏覽器裡沒有載入器的執行成本），另外有我們自己的模組
+> `webmod`（用 Yarn 名稱寫、建置時重新映射），之後的效能改寫都放在這裡。
+
+What differs from the main branch (`ccr-a6ade281-dizv9f`, which carries the Fabulously Optimized set and Iris):
+
+* **Mods**: `scripts/get-mods.sh perf` downloads only the performance mods (Sodium 0.2.0, Lithium 0.6.6,
+  Phosphor 0.8.0, FerriteCore 2.1.1); build with `WITH_FABRIC_API=false scripts/build-web.sh` (none of the four
+  needs Fabric API). `MODS_DIR=...` picks another folder for both scripts. The release Wasm module is 33 MB
+  instead of 58 MB (53 and 111 MB with the debug names), the title screen shows after about 13 s instead of 40–50 s
+  on the test machine, and a TeaVM compile takes about 15 minutes instead of 35–40. Any other Fabric jar still
+  works the way the main branch describes.
+* **TeaFabric's own mod** (`webmod/`): written against Yarn names, compiled against the Yarn-named client and
+  remapped to intermediary names with tiny-remapper (mixin annotations included), then baked like any mod. It
+  holds the game-level changes below; it is where further rewrites of Minecraft's code go.
+* **Singleplayer worlds in a Web Worker**, as Eaglercraft does: `world-worker.js` starts the same `classes.wasm`
+  (handed over by the page, not downloaded again) with `main(["--worker"])`; Minecraft is bootstrapped there
+  without a window, GL or sound. Playing or creating a world (`MinecraftClient.startIntegratedServer` /
+  `createWorld`, replaced by a mixin) sends the world to the worker: `WorkerHost` loads the data packs and level
+  data as the client would, and `WorkerServer` (vanilla's integrated server without the client: pause, view
+  distance and the player's name arrive as messages) runs it. The client then joins it like a server: boot.js'
+  socket registry treats `ws://teafabric.worker/` as a socket over the worker's message port, so the normal
+  network code (packet encoding, the login) is used unchanged. Pausing (Esc) pauses and saves the world, "Save and
+  Quit to Title" saves and stops it, and the worker sends `level.dat` back for the world list. The worker keeps
+  `saves/` in browser storage (IndexedDB), the page everything else. `?noworker` runs worlds on the page as before.
+
+Measured in headless Chromium (4 cores, software rendering), a new world with the same seed:
+
+| | world on the page | world in the worker |
+|---|---|---|
+| main-thread share of the server | 20–24 % | 0 |
+| standing at spawn, rendering stubbed (`?nogl`): main-thread time per frame | 9.3 ms | 7.4 ms |
+| walking into new terrain for 40 s, rendering stubbed: frame rate | 28.4 fps | 41.9 fps |
+| ... longest frame / frames over 100 ms | 989 ms / 74 | 415 ms / 37 |
+| standing at spawn, software rendering 1280×720 | 9.7 fps | 9.1 fps |
+
+With software rendering the GPU work runs on the same 4 cores as the worker, so the frame rate there does not
+improve (it is set by the renderer, and the worker takes a core from it); the stubbed runs show what the page
+gains when the CPU, not the GPU, is the limit: the server's time leaves the page thread, and stalls while new
+terrain generates are halved. Not measured on a real GPU.
+
+**Fewer WebGL calls.** Sodium draws each chunk with one `glMultiDrawArrays` (a range per face direction). The GL
+layer used to issue every range as its own draw and move every vertex attribute pointer to the range's first vertex
+first. Now the pointers stay at the buffer's start (they are moved only for arrays in client memory), quads are
+drawn from an offset into the shared quad index buffer, and a chunk's ranges go out in one `WEBGL_multi_draw` call
+(one draw call each where the browser lacks it; the WebGPU layer draws from a first vertex too). At the same view
+(spectator above the spawn of seed `teafabric`, software rendering):
+
+| | before (`?nomultidraw`) | after |
+|---|---|---|
+| WebGL calls per frame | 4585 | 2058 |
+| ... `vertexAttribPointer` / `bindBuffer` | 2287 / 1163 | 847 / 440 |
+| ... draw calls | 581 | 220 (205 multi-draws) |
+| GL layer's own JavaScript time per frame | 1.6 ms | 1.0 ms |
+| frame rate | 4.3–4.4 fps | 4.4–4.5 fps |
+
+The picture is the same (5 of 921,600 pixels differ). The frame rate does not change here: software rendering is
+limited by SwiftShader's rasterisation, which the page waits for. The gain is meant for real GPUs, where each WebGL
+call is also validated in the browser's GPU process; not measured. `?nomultidraw` restores the old path (for
+comparisons, or should a driver misbehave).
+
+Known limitations: worlds get no list icon (vanilla takes that screenshot next to the integrated server; the list shows its placeholder), no "Open to LAN"; the worker is a second
+instance of the program (more memory: the program and Minecraft's registries twice); it restores every saved file
+from browser storage at start, not just the world being played.
 
 ## How it works
 
@@ -440,7 +508,7 @@ log in to Microsoft accounts or reach Mojang's session servers.
 ## Singleplayer
 
 Singleplayer runs Minecraft's own integrated server inside the page: in the compatibility edition on green threads
-next to the client, in the performance edition in a Web Worker (see that branch's README). Singleplayer → Create
+next to the client, in the performance edition in a Web Worker (see [Branch perf-1.16.5](#branch-perf-1165-performance-first)). Singleplayer → Create
 New World works as usual.
 
 * **Worlds are kept** in the browser's storage (IndexedDB), with the options, the server list, configs and
