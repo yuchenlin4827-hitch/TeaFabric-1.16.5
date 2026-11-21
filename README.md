@@ -1,39 +1,67 @@
 # TeaFabric-1.16.5
 
-Minecraft Java Edition 1.16.5 + Fabric, compiled ahead of time to **WebAssembly GC** with
-**TeaVM 0.16** and run in a browser page.
+Minecraft Java Edition 1.16.5 with Fabric mods, compiled ahead of time to **WebAssembly GC** with **TeaVM 0.16**
+and played in a browser page: singleplayer with worlds kept in the browser, multiplayer through a WebSocket
+relay, sound and music, every language, the mods of Fabulously Optimized and Iris shader packs.
 
-> **概要（中文）**：本專案在建置時從 Mojang 官方伺服器下載 1.16.5 客戶端與資源、從 FabricMC 下載最新穩定版
-> Fabric Loader（目前 0.20.1）與 1.16 最新的 Fabric API（0.42.0+1.16，45 個模組），以「真正的」Fabric Loader
-> 在建置期套用所有 Mixin，再用 TeaVM 編譯成單一 Wasm GC 模組，並以 WebGL 2 / WebAudio / DOM 取代 LWJGL。
-> 「JIT」指的是固定管線 OpenGL 的著色器即時特化：遊戲每使用一種新的 GL 狀態組合，就即時產生並編譯一支專用的
-> GLSL ES 3.00 程式並快取。目前狀態：在 Chromium 153 / Chrome 157 中可完整啟動到 **Minecraft 標題畫面**
-> （全景背景、Logo、閃爍標語與按鈕，滑鼠可操作），並可玩單人遊戲（世界存在瀏覽器裡）與多人連線，有音效與背景音樂，可切換語言（含繁體/簡體中文）。
-> 已移植 Fabulously Optimized 1.12.3（1.16.5 最後一版）的全部模組，以及 REI、WTHIT、AppleSkin、Mouse Wheelie、
-> BetterF3、ShulkerBoxTooltip 等介面/輔助模組；Iris 光影包可以用（在世界裡按 O，把光影包 zip 拖進頁面，MakeUp
-> Ultra Fast 與 BSL 已實測可正常顯示）。光影建議在載入畫面按「Use WebGPU」改用 WebGPU 繪圖（會記住；BSL
-> 在測試環境只有 WebGPU 跑得動）。
-> 詳見下方「Status」。
+## 中文說明
 
-## 線上體驗 / Try it
+**TeaFabric** 讓 Minecraft Java 版 1.16.5（加上 Fabric 模組）直接在瀏覽器裡跑：打開網頁就能玩，不用裝 Java，也不用
+啟動器。遊戲和模組在建置時由真正的 Fabric Loader 套用好所有 Mixin，再用 TeaVM 編譯成一個 WebAssembly 模組；
+OpenGL、音效、視窗和檔案系統換成瀏覽器的 WebGL 2 / WebGPU、WebAudio、DOM 和 IndexedDB。
 
-| | |
-|---|---|
-| **兼容版**（網頁）：Fabulously Optimized 全套模組 + Iris 光影，在瀏覽器裡直接玩（第一次約下載 43 MB，之後只下載更新的部分） | https://teafabric.teafabric-871743.workers.dev/ |
-| **效能版**（網頁）：只帶效能模組，單人世界在 Web Worker 裡跑（第一次約下載 32 MB） | https://teafabric-perf.teafabric-871743.workers.dev/ |
-| **下載版**：兼容版，Windows / macOS / Linux，下載一次（約 141 MB，可續傳），之後在本機開啟 | https://teafabric.teafabric-871743.workers.dev/download/ |
-| **QQ 群** | 1063719613 |
-| **Discord** | https://discord.gg/GGN6TUSdNN |
+### 線上體驗 / Try it
 
-- 網站有**密碼保護**：頁面包含 Minecraft 的程式和素材，不能公開發布。密碼請在 QQ 群或 Discord 索取（使用者名稱隨便填）。
-- 瀏覽器需要支援 WebAssembly GC：Chrome / Edge 119+、Firefox 120+、Safari 18.2+，建議用電腦（鍵盤加滑鼠）。
-- 兩個網頁版的載入畫面都有另一版的連結。網路慢的話建議用效能版或下載版。
-- 進入前要輸入自己的玩家名稱（不能用 `Player`）。「多人遊戲」清單裡已經有我們的伺服器；第一次進入伺服器時輸入
-  `/register 密碼 密碼`，之後每次輸入 `/login 密碼`。
+| 版本 | 內容 | 第一次下載 | 網址 |
+|---|---|---|---|
+| **兼容版** | Fabulously Optimized 全套模組、Iris 光影、REI / WTHIT / AppleSkin 等輔助模組 | 約 43 MB | https://teafabric.teafabric-871743.workers.dev/ |
+| **效能版** | 只有四個效能模組；單人世界在 Web Worker（另一條執行緒）裡跑，比較順 | 約 32 MB | https://teafabric-perf.teafabric-871743.workers.dev/ |
+| **下載版** | 兼容版，Windows / macOS / Linux，下載一次（約 141 MB，可續傳），之後在本機開 | — | https://teafabric.teafabric-871743.workers.dev/download/ |
 
-The demo above is password-protected because the page contains Minecraft's code and assets; ask for
-access on [Discord](https://discord.gg/GGN6TUSdNN) or in QQ group 1063719613. It needs a browser with
-WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari 18.2+). See
+- **QQ 群 1063719613** · **Discord** https://discord.gg/GGN6TUSdNN
+- 網站有**密碼**（頁面含 Minecraft 的程式和素材，不能公開），請在 QQ 群或 Discord 索取，使用者名稱隨便填。
+- 之後再開只下載有更新的部分。兩個版本的載入畫面都有連到另一版的連結。
+- 要用電腦（鍵盤加滑鼠），手機不支援。瀏覽器要支援 WebAssembly GC：Chrome / Edge 119 以上（Firefox 120+、
+  Safari 18.2+ 理論上可以，但沒測過）。
+
+**選哪個版本**：要光影或那些模組就用兼容版；電腦普通、網路慢、想要流暢就用效能版。
+
+### 怎麼玩
+
+- **名稱**：第一次開要輸入玩家名稱（3–16 個英文字母、數字或 `_`，不能用 `Player`）。網址後面加 `?rename` 可以改名。
+- **多人**：「多人遊戲」清單裡已經有我們的伺服器。第一次進去輸入 `/register 密碼 密碼`，之後每次 `/login 密碼`。
+  出生點是一座城鎮：工作坊、商店街、新手服務處（領新手禮包）、跑酷塔、野外傳送門；輸入 `/trigger help` 看指令
+  （`/spawn`、`/sethome`、`/home`、`/tpa`、`/back`、金鏟子圈地等）。
+- **單人**：「單人遊戲 → 建立新世界」。世界存在瀏覽器裡。遊戲每隔幾分鐘自動存檔，暫停（Esc）和「儲存並離開」時也會存，
+  幾秒後寫進瀏覽器，所以**關分頁前先按 Esc**。清除網站資料會把世界刪掉；兩個版本（和下載版）的世界是分開存的。
+  備份：「編輯世界 → 開啟世界資料夾」會下載世界 zip；把世界 zip 拖到「選擇世界」畫面就能匯入。
+- **光影（兼容版）**：在世界裡按 **O** 打開光影包畫面，把光影包 zip 拖進網頁，選它，按 Apply / Done。MakeUp Ultra
+  Fast 最輕；BSL 只在 WebGPU 下測得動。用光影建議在載入畫面按「Use WebGPU」（會記住，`?webgl` 可以改回）。
+  光影很吃效能，卡的話就關掉。
+- **資源包**：在「資源包」畫面把 zip 拖進網頁。
+- **模組**：網頁裡不能自己加模組（模組在建置時就編進去了），想要新模組只能重新建置。
+
+### 卡、閃、畫面停住怎麼辦
+
+- **卡頓**：最常見的是走進沒去過的地方、載入新區塊的時候（測試機上偶爾停 0.5–1 秒）。調低「視距」（預設 6）、關掉光影，
+  或改用效能版（世界在另一條執行緒，這種停頓大約少一半）。
+- **閃爍**：渲染重的時候會閃黑或閃天空色的問題已經修好；還會閃的話重新整理頁面，拿到新版本。
+- **跳出「畫面停止更新了」**：瀏覽器重置了顯卡渲染（通常是顯存不夠或顯卡驅動逾時）。單人世界會先自動暫停存檔，
+  按「重新載入」繼續。常發生的話調低視距、關掉光影。
+- **回報問題**：請說明用哪個版本、WebGL 還是 WebGPU（載入畫面上有寫）、當時在做什麼；可以的話按 F12，把 Console
+  裡的紅字截圖給我們。網址加 `?log` 會把記錄顯示在畫面上。
+
+### 目前做不到 / 已知問題
+
+- 不能用正版帳號登入，只能進離線模式（offline-mode）的伺服器，而且要透過 WebSocket 中繼。沒有「在區域網路公開」。
+- 「建立新世界 → 資料包」會失敗；把資料包放進世界 zip 的 `datapacks/` 資料夾再匯入可以用。
+- WebGPU：截圖（F2）和世界縮圖是黑的；準星對著腳邊的方塊時，選取框的線會畫歪。
+- 需要幾何著色器的光影包不能用。
+- 效能版的世界清單沒有縮圖。
+- 只在 Chrome / Chromium 上測過，所有數字都來自測試機（軟體渲染），沒有在真實顯卡上量過。
+
+The demo is password-protected because the page contains Minecraft's code and assets; ask for access on
+[Discord](https://discord.gg/GGN6TUSdNN) or in QQ group 1063719613. See
 [Hosting on Cloudflare](#hosting-on-cloudflare-password-protected) to run your own.
 
 ## Legal
@@ -43,6 +71,23 @@ Minecraft code or assets. Everything Mojang-derived (client jar, libraries, asse
 the compiled `classes.wasm`, `build/web/data/*.zip`) is downloaded or produced locally into
 git-ignored directories (`.cache/`, `build/`). Use the result only with your own copy of the game
 and do not publish the built web bundle.
+
+## Two editions
+
+The two hosted sites are built from two branches of this repository:
+
+| | compatibility edition (this branch, `ccr-a6ade281-dizv9f`) | performance edition (`perf-1.16.5`) |
+|---|---|---|
+| mods | Fabric API and 46 jars in `./mods`: the 45 that `scripts/get-mods.sh` downloads (Fabulously Optimized 1.12.3, REI, WTHIT, AppleSkin, Mouse Wheelie, BetterF3, ShulkerBoxTooltip) and ViaFabric, added by hand (see Server protocol); the title screen counts 141 mods with Fabric API's modules and bundled libraries | Sodium, Lithium, Phosphor and FerriteCore, no Fabric API, plus TeaFabric's own `webmod` |
+| shader packs (Iris) | yes | no |
+| singleplayer server | green threads on the page's thread, next to the client | a Web Worker (`?noworker`: on the page) |
+| Sodium's chunk draws | one draw call per range | one `WEBGL_multi_draw` call per chunk |
+| first download (release build, gzip) | 42.8 MB, of which 18.5 MB game code | 31.6 MB, of which 11.0 MB game code |
+| title screen on the test machine | 40–50 s | about 13 s |
+| TeaVM compile on 4 cores | 35–40 min, about 12 GB of RAM | about 15 min |
+
+The test machine throughout this README: headless Chromium, SwiftShader software rendering, 4 cores. Nothing
+was measured on a real GPU.
 
 ## How it works
 
@@ -119,8 +164,12 @@ Put additional Fabric mods (release jars for 1.16.5) into `./mods/`; they are ba
 
 ## Building
 
-Requirements: JDK 21, Gradle 8.14 (or the wrapper), ~6 GB RAM for TeaVM, network access to
-piston-meta/piston-data/libraries/resources (Mojang), meta/maven.fabricmc.net and Maven Central.
+Requirements: JDK 21, Gradle 8.14 (or the wrapper), Python 3, Go (only for the downloadable version) and network
+access to piston-meta/piston-data/libraries/resources (Mojang), meta/maven.fabricmc.net and Maven Central. For the
+compatibility edition's full mod set, a machine with 16 GB of RAM: TeaVM's compiler heap is the machine's memory
+minus 4 GB, between 6 and 12 GB (`TEAVM_HEAP=8g` overrides), and this mod set uses about 12 GB. A full build takes
+about an hour on 4 cores: baking about a minute, each TeaVM compile 35–40 minutes, and the first compile after the
+mod set changed usually finds APIs to stub and compiles again. The performance edition builds in about 15 minutes.
 
 One command does everything below (download on the first run, bake, compile with the stub loop,
 package):
@@ -173,7 +222,7 @@ The browser asks for the password once (any user name); a signed cookie then kee
 Cloudflare does not compress these files, so the deploy stores the large ones gzip-compressed under
 content-hashed names in `c/` (in parts below the 25 MiB file limit), listed in `files.json`; `boot.js`
 downloads them with progress and decompresses them natively (`DecompressionStream`). A first visit
-downloads about 40 MB instead of about 147 MB, and the Worker lets browsers keep `c/`, `sounds/` and
+downloads about 43 MB (the performance edition 32 MB) instead of about 150 MB, and the Worker lets browsers keep `c/`, `sounds/` and
 `lang/` for a year, so later visits download only what a new build changed (tested: a second visit
 fetched none of the large files again). The same Worker relays multiplayer
 connections: use `wss://<worker>.workers.dev/relay?target=mc.example.com:25565` as the server address
@@ -390,42 +439,39 @@ log in to Microsoft accounts or reach Mojang's session servers.
 
 ## Singleplayer
 
-Singleplayer runs Minecraft's own integrated server inside the page, on green threads next to the
-client: Singleplayer → Create New World works as usual.
+Singleplayer runs Minecraft's own integrated server inside the page: in the compatibility edition on green threads
+next to the client, in the performance edition in a Web Worker (see that branch's README). Singleplayer → Create
+New World works as usual.
 
-* **Worlds are kept** in the browser's storage (IndexedDB), with the options, the server list, config
-  and resource packs: files are written back a few seconds after the game saves them (Minecraft saves
-  a world when the game is paused and when it is left, so use *Save and Quit* or pause before closing
-  the tab). `?nopersist` starts without saved data and keeps nothing; `?resetstorage` deletes it first.
-  Clearing the site's data in the browser removes it too.
-* **Smaller spawn area**: vanilla generates 21×21 chunks around the spawn before a new world opens and
-  keeps them loaded forever. In the page the radius is 5 (9×9 chunks) by default, which brings world
-  creation from about 160 s to about 55 s (headless Chromium, software WebGL) and leaves the server less
-  to tick; `?spawnRadius=11` restores vanilla behaviour (1–11).
+* **Worlds are kept** in the browser's storage (IndexedDB), with the options, the server list, configs and
+  resource packs: files are written back a few seconds after the game saves them. Minecraft saves a world every
+  few minutes, when the game is paused and when it is left, so pause or *Save and Quit* before closing the tab.
+  Each site keeps its own storage: the two editions and the downloadable version do not share worlds.
+  `?nopersist` starts without saved data and keeps nothing; `?resetstorage` deletes it first. Clearing the
+  site's data in the browser removes it too.
+* **Smaller spawn area**: vanilla generates 21×21 chunks around the spawn before a new world opens and keeps
+  them loaded forever. In the page the radius is 5 (9×9 chunks) by default; `?spawnRadius=11` restores vanilla
+  (1–11). On the test machine a new world opens 22–28 s after Create New World.
 * **Backups / moving worlds**: *Open World Folder* (Edit World) downloads the world as a zip, *Make
   Backup* followed by *Open Backups Folder* downloads the backup; other "Open … Folder" buttons work the
   same way and web links open in a new tab. Dropping a world zip on the Select World screen imports it.
 
-Tested in headless Chromium: create a world (spawn area ≈50 s), Save and Quit, reload the page, the
-world is listed with its icon and opens at the same position; Open World Folder downloads
-`New World.zip`, Make Backup + Open Backups Folder downloads the backups, and dropping
-`New World.zip` back on the list adds "New World (2)", which opens.
+Tested: create a world, Save and Quit, reload the page, the world is listed with its icon and opens at the same
+position; Open World Folder downloads `New World.zip`, and dropping it back on the list adds "New World (2)",
+which opens.
 
 How it works:
 
 * the client and the integrated server talk over a pair of in-memory Netty channels (Netty's local
   transport needs event-loop threads), pumped once per frame;
 * worker tasks submitted by the server (world generation, region-file I/O) run on a worker green thread
-  that yields after every task, and the server's task loop yields too, so the page never freezes;
+  that yields after every task, and the server's task loop yields too, so the page keeps drawing (with the
+  stalls under Status while new terrain generates);
 * fixes for TeaVM's in-memory file system and class library that saving needs: files opened `"rw"`
   are no longer truncated, `FileChannel.open(CREATE)` creates files, direct buffers are zeroed,
   `Deflater` accepts `Z_BUF_ERROR`, `Files.newByteChannel`, multi-dimensional `Array.newInstance`;
 * the server's RSA key pair is skipped (only online-mode logins over the network use it).
 
-Performance (headless Chromium, SwiftShader software WebGL, 4 cores): about 6 fps while playing;
-server ticks of 100–150 ms with the default spawn area (≈200 ms with the vanilla one) instead of 50 ms —
-the client and the server share one browser thread. A real GPU helps the frame rate; a lower render
-distance helps both.
 "Open to LAN" is impossible in a browser.
 
 ## Mods
@@ -457,7 +503,7 @@ What does work without a rebuild:
   data packs on a server.
 * **Server-side mods and plugins** of the server you connect to (anything that needs no client code).
 
-Rebuilding after adding jars to `./mods` takes about 15–25 minutes (bake + TeaVM + packaging), and
+Rebuilding after adding jars to `./mods` takes about an hour with the full set on 4 cores (see Building), and
 the result is a new static `build/web` directory to serve.
 
 ### Optimization mods
@@ -633,75 +679,99 @@ direct implementations, its relocated Gson `TypeToken`s get build-time generic-s
 update check is skipped. Its protocol auto-detection (`AUTO`) cannot open a second connection from the
 page, so pick the version explicitly.
 
-Page switches (debugging): `?log` (log overlay), `?username=Name`, `?rename` (ask for the player name again), `?threads` (Minecraft worker pools
-on green threads instead of inline), `?trace` (GL upload/draw trace), `?beacon` (log lines are sent to
-the HTTP server, survives renderer crashes), `?nogl`, `?noaudio`, `?nobuiltins`, `?nodeobf`,
-`?nofinalize` / `?noweak` (no GC callbacks into Wasm / strong weak references), `?waits` (print the
-Java stack of any lock/future/park wait blocked for more than 5 s: finds green-thread deadlocks),
-`?vanillaMain` (start through `net.minecraft.client.main.Main`), `?debug` (the debug build: Java names in browser stack traces and profiles, Java stack traces resolved to source lines; players get the release build without them), `?debuglog` (DEBUG log level; start-up currently fails with an ArrayIndexOutOfBoundsException in `Bootstrap.logMissing` at that level),
-`?netdebug` (stacks for disconnects and closed connections).
+## Page switches
+
+Added to the page address (`…/?webgpu`, several with `&`):
+
+| switch | effect |
+|---|---|
+| `?rename`, `?username=Name` | ask for the player name again; use a name for this page load only |
+| `?webgpu`, `?webgl` | renderer for this load (the loading panel's button remembers a choice) |
+| `?server=wss://…`, `?proxy=wss://…`, `?protocol=1.12.2` | connect right after start-up; send plain `host:port` addresses through a relay; server version through ViaFabric (compatibility edition) |
+| `?spawnRadius=N` | spawn area of new worlds, 1–11 (default 5; 11 is vanilla) |
+| `?nopersist`, `?resetstorage` | start without saved data and keep nothing; delete the saved data first |
+| `?noworker`, `?nomultidraw` | performance edition only: worlds on the page instead of the worker; the old one-draw-per-range path |
+| `?log` | log overlay on the page |
+| `?debug` | the debug build: Java names in browser stack traces and profiles, Java stack traces resolved to source lines |
+| `?debuglog` | DEBUG log level (start-up currently fails at that level, in `Bootstrap.logMissing`) |
+| `?eagerclear` | clear the canvas when the game asks, not with the frame's picture (brings the old flicker back; for comparisons) |
+| `?waits` | print the Java stack of any lock, future or park wait blocked for more than 5 s (finds green-thread deadlocks) |
+| `?threads` | Minecraft's worker pools on green threads instead of inline |
+| `?trace`, `?netdebug`, `?beacon`, `?probe` | GL upload/draw trace; stacks for disconnects; log lines sent to the HTTP server (survives renderer crashes); start-up probes |
+| `?nogl`, `?noaudio`, `?nobuiltins`, `?nodeobf`, `?nofinalize`, `?noweak`, `?vanillaMain` | engine experiments: no rendering, no sound, no JS string builtins, no stack deobfuscation, no GC callbacks into Wasm, strong weak references, start through `net.minecraft.client.main.Main` |
 
 ## Status
 
-Working:
+Works (in both editions unless noted; tested on the test machine and played on the hosted sites):
 
-* Download pipeline (SHA-1 verified), latest Fabric Loader (0.20.1) and Fabric API (0.42.0+1.16).
-* Build-time Mixin application for all 50 mods; Fabric API client entrypoints run in the browser.
-* TeaVM 0.16 compiles Minecraft + Fabric (≈20,000 classes, ≈120,000 methods) into a valid Wasm GC module.
-* In Chromium 153 and Chrome 157: `Bootstrap` (all registries) in ≈2.5 s, `MinecraftClient`
-  construction with the complete resource reload (all texture atlases, models, sound engine) in ≈15 s,
-  the Mojang loading screen, and the **title screen** (panorama, logo, splash text, buttons, mouse
-  hover) rendered through WebGL 2 and the fixed-function shader JIT, frame-paced by
-  `requestAnimationFrame`.
-* Text input in screens (letters, IME / Chinese, clipboard), multiplayer over `ws://` / `wss://`
-  (joining a 1.16.5 server, world rendering, walking, chat, the F3 screen).
-* Sound: effects and streamed music through WebAudio, decoded by the browser (tested in Chromium:
-  button clicks, menu music, footsteps and other sounds in a world).
-* Every language: switching to 繁體中文 takes under a second (one translation file is fetched).
-* Graphics: Fast and Fancy. Fabulous! is not offered (its translucency post-processing chain is not
-  supported by the WebGL emulation and rendered worlds black); Fabulous in an old options.txt loads as
-  Fancy, and the GPU warnlist screen is off (the emulation reports OpenGL 2.1, so it always warned).
-* TeaVM class-library bugs found by running the same programs on the JVM and in the browser and
-  diffing the output, all patched in `compiler/src/runtime`: `ArrayDeque` iterator removal,
-  `ListIterator.add`, `java.util.Random` (now bit-identical to the JDK), `Math.round/rint/ulp/cbrt/log10`,
-  `String.format` (`%%`, `%n`, `%f` rounding and `-0.0`), superclass-first static initialisation (in the
-  `SplitClinits` pre-pass), `ConcurrentHashMap.newKeySet`, `Logger(String, String)`.
+* loading screen, title screen, every language (switching to 繁體中文 takes under a second), sound and music;
+* singleplayer: create, play, save, reload the page and continue, back up and import worlds;
+* multiplayer over `ws://` / `wss://`: 1.16.5 servers, older ones (1.8–1.16.4) through ViaFabric in the
+  compatibility edition; chat, commands, text input with IME (Chinese) and the clipboard;
+* the mods listed under [Two editions](#two-editions); Iris shader packs in the compatibility edition (MakeUp
+  Ultra Fast with WebGL 2 and WebGPU, BSL with WebGPU);
+* the hosted sites (password, download progress, long-term caching, a downloadable version) and the Railway
+  server (logins, the spawn town, helper plugins).
 
-Not working yet / known issues:
+Known issues and limits:
 
-* Fixed on the way to the title screen (TeaVM 0.16.0 issues, all patched in `compiler/`):
-  `@Async` implementations were coroutine-transformed when anything they call may suspend
-  (`AsyncMethodFinder`; `Object.wait` never released its monitor, `requestAnimationFrame` was never
-  called), contended monitors dropped all but one queued thread (`TObject.waitForOtherThreads`),
-  interrupted waits resumed without the monitor, and `assert` statements were enabled
-  (`desiredAssertionStatus`); ICU4J's property data is now packaged for Minecraft's Bidi text code.
-* Fixed: the earlier Chromium renderer crash was V8's optimising compiler running out of zone memory
-  (`V8 process OOM (Zone)`, Turboshaft `WasmGCOptimize` phase) when tiering up the 230 KB Wasm
-  function of `Blocks.<clinit>`; found with a gdb-attached renderer, a CDP trace and
-  `--wasm-tier-up-filter`, fixed by the function splitters above. Strict mode stays enabled because
-  null dereferences relying on engine traps crash Chromium (reproduced with a 10-line TeaVM program).
-* Singleplayer is slow: the integrated server shares the page's only thread with the client.
-* Multiplayer needs a WebSocket ↔ TCP proxy (browsers cannot open TCP sockets); online-mode
-  authentication is not available.
-* Performance: the module is compiled with TeaVM's `ADVANCED` optimisation (72 MB instead of 106 MB with
-  `SIMPLE`; measured in headless Chromium: title screen after 11.0 s instead of 12.9 s, a new world ready
-  after 43 s instead of 63 s). The WebGL emulation skips redundant calls: it keeps the state it last
-  set (texture parameters per texture, pixel store, buffer and texture bindings, attribute pointers and
-  values) and each fixed-function program remembers its uniform values. Counted in a singleplayer world,
-  WebGL calls per frame fell from about 9,000 to about 1,450 (texParameteri 2,981 to 9, pixelStorei 2,911
-  to 135, mostly from animated textures), and the frame rate under software rendering from 3.7 to 6.5.
-* Lighter video settings for the browser (`WebDefaults`): once per player, options still at vanilla's
-  default become render distance 6, biome blend 3×3, mipmap levels 2, fast clouds and decreased
-  particles; options a player changed are kept.
-* WebGPU (`?webgpu` in the page address; WebGL 2 stays the default): `web/webgpu/webgpu-gl.js` implements the
-  WebGL 2 calls the GL emulation makes on WebGPU, so the game itself is unchanged. Shaders are converted when
-  a program is linked, GLSL ES 3.00 to Vulkan-style GLSL (`glsl-vk.js`) and then to WGSL by naga, the shader
-  translator of wgpu (`web/webgpu/naga`, from the naga-wasm package, MIT/Apache-2.0); all 17 programs the game
-  and Sodium use convert. OpenGL's conventions are kept (clip depth, bottom-up rows in render targets,
-  integer attributes, triangle fans), streamed vertices and uniforms go to per-submit buffers, and a frame is
-  submitted when the game swaps buffers. The title screen and singleplayer worlds with Sodium render as with
-  WebGL (tested in headless Chromium with SwiftShader, locally and on the Cloudflare site). Frame rates under
-  software rendering were the same within noise (5.7 and 3.7 fps with WebGL, 5.4 and 2.3 with WebGPU): the
-  time goes to Minecraft's own code, not to the graphics API. Not supported yet: readPixels (screenshots and
-  the world icon come back black), stencil, clears limited by a scissor. For shader packs, see Iris under "Mods";
-  WebGPU can also be chosen on the loading panel.
+* **Stalls while new terrain loads**: walking into new chunks, single frames took 0.4–1.6 s on the test machine.
+  A lower render distance helps, and the performance edition (the server's work leaves the page thread; such
+  stalls about halved there).
+* **The compatibility edition's singleplayer server shares the page's thread** with the client (server ticks
+  took 100–150 ms instead of 50 ms in an earlier measurement on the test machine).
+* WebGPU: `readPixels` is not implemented (screenshots and world icons are black), nor stencil or clears limited
+  by a scissor; the block selection outline is drawn wrongly when the targeted block is next to the camera.
+* Create World → Data Packs fails (it needs `Files.createTempDirectory`); put packs into a world zip instead.
+* Shader packs that need geometry shaders do not work, and shader packs are heavy for a page.
+* No "Open to LAN", no online-mode servers (no Microsoft login), multiplayer needs a WebSocket relay.
+* `?debuglog` fails at start-up.
+* Performance edition: worlds have no list icon; the worker is a second copy of the program (more memory).
+* Only tested in Chromium and Chrome; not measured on real GPUs.
+
+Fixed in November 2026:
+
+* the screen flickered (the cleared canvas was shown) whenever the game thread yielded in the middle of a frame;
+  while walking into new chunks that was two frames out of three (see "Canvas presentation" above);
+* a lost WebGL context or WebGPU device froze the picture without a word; the page now saves and offers a reload;
+* the compatibility edition crashed (`NoSuchFieldException`) when Slight GUI Modifications faded GUI textures in,
+  for example on Iris' shader pack screen;
+* "Broken/missing pack.mcmeta" at start-up in the compatibility edition (Gson's `JsonReader` fields).
+
+## Engineering notes
+
+* **TeaVM class-library bugs** found by running the same programs on the JVM and in the browser and diffing the
+  output, all patched in `compiler/src/runtime`: `ArrayDeque` iterator removal, `ListIterator.add`,
+  `java.util.Random` (now bit-identical to the JDK), `Math.round/rint/ulp/cbrt/log10`, `String.format` (`%%`,
+  `%n`, `%f` rounding and `-0.0`), superclass-first static initialisation (in the `SplitClinits` pre-pass),
+  `ConcurrentHashMap.newKeySet`, `Logger(String, String)`.
+* **TeaVM 0.16.0 issues on the way to the title screen**, patched in `compiler/`: `@Async` implementations were
+  coroutine-transformed when anything they call may suspend (`AsyncMethodFinder`; `Object.wait` never released
+  its monitor, `requestAnimationFrame` was never called), contended monitors dropped all but one queued thread
+  (`TObject.waitForOtherThreads`), interrupted waits resumed without the monitor, and `assert` statements were
+  enabled (`desiredAssertionStatus`); ICU4J's property data is packaged for Minecraft's Bidi text code.
+* **Renderer crash**: Chromium's renderer died when V8's optimising compiler ran out of zone memory
+  (`V8 process OOM (Zone)`, Turboshaft `WasmGCOptimize`) tiering up the 230 KB Wasm function of
+  `Blocks.<clinit>`; found with a gdb-attached renderer, a CDP trace and `--wasm-tier-up-filter`, fixed by the
+  function splitters (see Compiler). Strict mode stays on because null dereferences relying on engine traps
+  crash Chromium (reproduced with a 10-line TeaVM program).
+* **Optimisation level**: TeaVM's `ADVANCED` (72 MB instead of 106 MB with `SIMPLE` at the time; title screen
+  after 11.0 s instead of 12.9 s, a new world after 43 s instead of 63 s, before the optimization mods).
+* **Fewer WebGL calls**: the WebGL emulation keeps the state it last set (texture parameters per texture, pixel
+  store, buffer and texture bindings, attribute pointers and values) and each fixed-function program remembers
+  its uniform values: in a singleplayer world, WebGL calls per frame fell from about 9,000 to about 1,450
+  (texParameteri 2,981 to 9, pixelStorei 2,911 to 135, mostly from animated textures). Sodium then brought it
+  to about 900 (see Optimization mods); the performance edition's multi-draw path about halves the calls again.
+* **Lighter video settings** (`WebDefaults`): once per player, options still at vanilla's default become render
+  distance 6, biome blend 3×3, mipmap levels 2, fast clouds and decreased particles; options a player changed
+  are kept. Graphics offers Fast and Fancy; Fabulous! is not offered (its post-processing chain rendered worlds
+  black), an old Fabulous setting loads as Fancy, and the GPU warnlist screen is off (the emulation reports
+  OpenGL 2.1, so it always warned).
+* **WebGPU** (`?webgpu`, or the loading panel's button; WebGL 2 stays the default): `web/webgpu/webgpu-gl.js`
+  implements the WebGL 2 calls the GL emulation makes on WebGPU, so the game itself is unchanged. Shaders are
+  converted when a program is linked, GLSL ES 3.00 to Vulkan-style GLSL (`glsl-vk.js`) and then to WGSL by naga,
+  the shader translator of wgpu (`web/webgpu/naga`, from the naga-wasm package, MIT/Apache-2.0). OpenGL's
+  conventions are kept (clip depth, bottom-up rows in render targets, integer attributes, triangle fans),
+  streamed vertices and uniforms go to per-submit buffers, and a frame is submitted when the game swaps
+  buffers. Frame rates on the test machine were the same as WebGL within noise (the time goes to Minecraft's own
+  code); its use is shader packs (see Iris under "Mods").
