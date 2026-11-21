@@ -337,6 +337,9 @@ also allow `http://127.0.0.1:47265` for the downloaded version to join.
 
 ### A server for the web client on Railway
 
+(The spawn town data pack, the plugin patches and the town's claim file described below are on the main branch,
+`ccr-a6ade281-dizv9f`, in `deploy/railway/`; this branch has the relay and the first two patches.)
+
 A 1.16.5 server that the page can join, on [Railway](https://railway.com) (Hobby plan): Paper 1.16.5 from
 the `itzg/minecraft-server` image with a volume for the world, plus `proxy/ws-proxy.js` as a second service
 (`deploy/railway/relay`) that is the only way in: it reaches the server over Railway's private network
