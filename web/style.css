@@ -56,7 +56,7 @@ html, body {
   font: inherit;
 }
 #name-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-#name-form button {
+#name-form button, #reload {
   padding: 8px 16px;
   border: 0;
   border-radius: 4px;
@@ -66,6 +66,8 @@ html, body {
   font-weight: 600;
   cursor: pointer;
 }
+#reload { margin: 4px 0 12px; }
+#reload:disabled { opacity: 0.6; cursor: default; }
 #name-hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 #name-hint.error { color: var(--error); }
 #note { color: var(--muted); font-size: 12px; margin-bottom: 0; }

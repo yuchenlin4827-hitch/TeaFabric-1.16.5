@@ -87,16 +87,148 @@
   // ?webgpu: render through WebGPU (webgpu/webgpu-gl.js, a WebGL 2 context on WebGPU); set up in start().
   let webgpu = null;
 
+  // The game clears the canvas (framebuffer 0) at the start of every frame (MinecraftClient.render clears before
+  // it binds its own framebuffer) and puts the finished picture into the canvas only at the end, right before
+  // glfwSwapBuffers. When the game thread yields in between (chunk building, waits on locks, the integrated
+  // server's turn), the browser shows the canvas as it is at its next animation frame: cleared, a flash. Measured
+  // while walking into new chunks: two frames out of three. So a clear of the canvas waits for the next operation
+  // that uses the canvas (normally the finished picture) or the end of the frame, and then runs with the clear
+  // colour, masks and scissor of the moment it was issued: the canvas only changes in the task that completes the
+  // frame. ?eagerclear: clear at once, as before.
+  let flushCanvasClear = null;
+  function deferCanvasClears(gl) {
+    if (params.has('eagerclear')) return gl;
+    const FRONT = 0x0404, FRONT_AND_BACK = 0x0408, FRAMEBUFFER = 0x8D40, READ = 0x8CA8, DRAW = 0x8CA9, SCISSOR = 0x0C11;
+    const raw = {};
+    for (const k of ['clear', 'clearColor', 'clearDepth', 'clearStencil', 'colorMask', 'depthMask', 'stencilMask',
+      'stencilMaskSeparate', 'enable', 'disable', 'scissor', 'bindFramebuffer', 'getExtension']) {
+      if (typeof gl[k] === 'function') raw[k] = gl[k].bind(gl);
+    }
+    let drawFb = null, readFb = null, pending = null;
+    // what a clear depends on (WebGL's initial values)
+    const s = { color: [0, 0, 0, 0], depth: 1, stencil: 0, cmask: [true, true, true, true], dmask: true,
+      smask: 0xFFFFFFFF, scissor: false, box: [0, 0, canvas.width, canvas.height] };
+    const same = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
+
+    function apply(to, from) { // GL state from `from` to `to`
+      if (!same(to.color, from.color)) raw.clearColor(to.color[0], to.color[1], to.color[2], to.color[3]);
+      if (to.depth !== from.depth) raw.clearDepth(to.depth);
+      if (to.stencil !== from.stencil) raw.clearStencil(to.stencil);
+      if (!same(to.cmask, from.cmask)) raw.colorMask(to.cmask[0], to.cmask[1], to.cmask[2], to.cmask[3]);
+      if (to.dmask !== from.dmask) raw.depthMask(to.dmask);
+      if (to.smask !== from.smask) raw.stencilMaskSeparate(FRONT, to.smask);
+      if (to.scissor !== from.scissor) (to.scissor ? raw.enable : raw.disable)(SCISSOR);
+      if (!same(to.box, from.box)) raw.scissor(to.box[0], to.box[1], to.box[2], to.box[3]);
+    }
+    function flush() {
+      const p = pending;
+      pending = null;
+      apply(p, s);
+      if (drawFb !== null) raw.bindFramebuffer(DRAW, null);
+      raw.clear(p.mask);
+      if (drawFb !== null) raw.bindFramebuffer(DRAW, drawFb);
+      apply(s, p);
+    }
+    flushCanvasClear = function () { if (pending) flush(); };
+
+    gl.clear = function (mask) {
+      if (drawFb !== null) return raw.clear(mask);
+      if (pending) flush();
+      pending = { mask, color: s.color.slice(), depth: s.depth, stencil: s.stencil, cmask: s.cmask.slice(),
+        dmask: s.dmask, smask: s.smask, scissor: s.scissor, box: s.box.slice() };
+    };
+    gl.clearColor = function (r, g, b, a) { s.color[0] = r; s.color[1] = g; s.color[2] = b; s.color[3] = a; raw.clearColor(r, g, b, a); };
+    gl.clearDepth = function (d) { s.depth = d; raw.clearDepth(d); };
+    gl.clearStencil = function (v) { s.stencil = v; raw.clearStencil(v); };
+    gl.colorMask = function (r, g, b, a) { s.cmask[0] = r; s.cmask[1] = g; s.cmask[2] = b; s.cmask[3] = a; raw.colorMask(r, g, b, a); };
+    gl.depthMask = function (f) { s.dmask = f; raw.depthMask(f); };
+    gl.stencilMask = function (m) { s.smask = m; raw.stencilMask(m); };
+    gl.stencilMaskSeparate = function (face, m) { if (face === FRONT || face === FRONT_AND_BACK) s.smask = m; raw.stencilMaskSeparate(face, m); };
+    gl.enable = function (cap) { if (cap === SCISSOR) s.scissor = true; raw.enable(cap); };
+    gl.disable = function (cap) { if (cap === SCISSOR) s.scissor = false; raw.disable(cap); };
+    gl.scissor = function (x, y, w, h) { s.box[0] = x; s.box[1] = y; s.box[2] = w; s.box[3] = h; raw.scissor(x, y, w, h); };
+    gl.bindFramebuffer = function (target, fb) {
+      if (target === FRAMEBUFFER || target === DRAW) drawFb = fb;
+      if (target === FRAMEBUFFER || target === READ) readFb = fb;
+      raw.bindFramebuffer(target, fb);
+    };
+    // everything else that writes or reads the canvas runs the pending clear first (arguments passed on exactly
+    // as given: some WebGL calls choose their overload by the number of arguments)
+    const before = (names, touches) => {
+      for (const k of names) {
+        if (typeof gl[k] !== 'function') continue;
+        const f = gl[k].bind(gl);
+        gl[k] = function (...a) { if (pending && touches()) flush(); return f(...a); };
+      }
+    };
+    // the draw calls, called thousands of times a frame, without the argument array
+    const draw3 = gl.drawArrays.bind(gl), draw4 = gl.drawElements.bind(gl);
+    gl.drawArrays = function (m, first, n) { if (pending && drawFb === null) flush(); draw3(m, first, n); };
+    gl.drawElements = function (m, n, type, offset) { if (pending && drawFb === null) flush(); draw4(m, n, type, offset); };
+    before(['drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements',
+      'clearBufferfv', 'clearBufferiv', 'clearBufferuiv', 'clearBufferfi', 'invalidateFramebuffer',
+      'invalidateSubFramebuffer'], () => drawFb === null);
+    before(['blitFramebuffer'], () => drawFb === null || readFb === null);
+    before(['readPixels', 'copyTexImage2D', 'copyTexSubImage2D'], () => readFb === null);
+    const wrapped = new WeakSet();
+    if (raw.getExtension) {
+      gl.getExtension = function (name) {
+        const e = raw.getExtension(name);
+        if (e && /draw/i.test(name) && !wrapped.has(e)) {
+          wrapped.add(e);
+          for (const k in e) {
+            if (typeof e[k] !== 'function' || !/^(multiD|d)raw/.test(k)) continue;
+            const f = e[k].bind(e);
+            e[k] = function (...a) { if (pending && drawFb === null) flush(); return f(...a); };
+          }
+        }
+        return e;
+      };
+    }
+    return gl;
+  }
+
+  // A lost context (the GPU process or its driver was reset: heavy load, too little video memory, a driver
+  // timeout) leaves the game running with every draw ignored, and the picture stops for good: the game cannot
+  // rebuild its textures and buffers. So the page releases the mouse (in a world Minecraft then opens the pause
+  // menu, which saves a single-player world), says what happened and offers a reload.
+  function graphicsLost(what) {
+    console.error('[TeaFabric] ' + what + ': the browser reset the graphics; the picture cannot be restored');
+    if (locked()) {
+      document.exitPointerLock(); // pointerlockchange sends Esc
+    } else if (tf.wantLock) {
+      tf.events.push([1, 256, 256, 1, 0]);
+      tf.events.push([1, 256, 256, 0, 0]);
+    }
+    fail('画面停止更新了：浏览器重置了显卡渲染（' + what + '，常见原因是显存不够或显卡驱动超时）。'
+      + '在单人世界里游戏会先暂停并存档，然后点下面的按钮重新载入。经常出现的话，请调低视距、关掉光影，或改用效能版。'
+      + ' / The browser reset the graphics; reload to continue.');
+    document.getElementById('bar').style.display = 'none';
+    if (document.getElementById('reload')) return;
+    const button = document.createElement('button');
+    button.id = 'reload';
+    button.type = 'button';
+    button.textContent = '重新载入 / Reload';
+    button.addEventListener('click', function () {
+      button.disabled = true;
+      setStatus('正在保存… / Saving…');
+      // the pause menu's save reaches browser storage within WebPersistence's 3 s interval
+      setTimeout(function () { tf.store.flush(); setTimeout(function () { location.reload(); }, 1000); }, 3500);
+    });
+    statusEl.after(button);
+  }
+  canvas.addEventListener('webglcontextlost', function () { graphicsLost('WebGL context lost'); });
+
   tf.createGL = function () {
     if (params.has('nogl')) { overlay.classList.add('hidden'); return stubGL(); }
-    if (webgpu) { overlay.classList.add('hidden'); return webgpu.createContext(); }
+    if (webgpu) { overlay.classList.add('hidden'); return deferCanvasClears(webgpu.createContext()); }
     const gl = canvas.getContext('webgl2', {
       alpha: false, depth: true, stencil: true, antialias: false,
       premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance'
     });
     if (!gl) throw new Error('WebGL 2 is not available');
     overlay.classList.add('hidden');
-    return gl;
+    return deferCanvasClears(gl);
   };
 
   function resize() {
@@ -742,6 +874,7 @@
           await loadScript('webgpu/webgpu-gl.js');
           const info = await TFWebGPU.init(canvas);
           webgpu = TFWebGPU;
+          TFWebGPU.onLost = function (i) { graphicsLost('WebGPU device lost: ' + (i.message || i.reason)); };
           console.info('[TeaFabric] Rendering with WebGPU: ' + info);
         } catch (e) {
           console.warn('[TeaFabric] WebGPU is not available, using WebGL 2: ' + (e && e.message ? e.message : e));
@@ -764,6 +897,7 @@
           // Frame pacing for glfwSwapBuffers (see WebWindow.waitForFrame).
           imports.teafabricFrame = {
             request: function () {
+              if (flushCanvasClear) flushCanvasClear(); // a frame that only cleared the canvas
               if (webgpu) webgpu.endFrame(); // submit the frame's WebGPU commands
               requestAnimationFrame(function () { wasmExports.teafabricFrameReady(); });
             }
